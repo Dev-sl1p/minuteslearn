@@ -1,0 +1,194 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+model User {
+  id               String            @id @default(cuid())
+  name             String?
+  email            String            @unique
+  emailVerified    DateTime?
+  image            String?
+  passwordHash     String?
+  role             String            @default("USER")
+  accounts         Account[]
+  sessions         Session[]
+  licenses         License[]
+  entitlements     Entitlement[]
+  devices          Device[]
+  playbackSessions PlaybackSession[]
+  lessonProgress   LessonProgress[]
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+}
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String?
+  access_token      String?
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String?
+  session_state     String?
+  user              User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+}
+
+model Course {
+  id           String        @id @default(cuid())
+  title        String
+  slug         String        @unique
+  description  String?
+  coverUrl     String?
+  wooProductId String?
+  wooSku       String?
+  published    Boolean       @default(false)
+  lessons      Lesson[]
+  entitlements Entitlement[]
+  licenses     License[]
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+}
+
+model Lesson {
+  id            String           @id @default(cuid())
+  courseId      String
+  course        Course           @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  title         String
+  slug          String
+  description   String?
+  order         Int              @default(0)
+  streamAssetId String?
+  durationSec   Int?
+  progress      LessonProgress[]
+  createdAt     DateTime         @default(now())
+  updatedAt     DateTime         @updatedAt
+
+  @@unique([courseId, slug])
+}
+
+model LessonProgress {
+  id          String    @id @default(cuid())
+  userId      String
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  lessonId    String
+  lesson      Lesson    @relation(fields: [lessonId], references: [id], onDelete: Cascade)
+  courseId    String
+  watchedSec  Float     @default(0)
+  percent     Float     @default(0)
+  completed   Boolean   @default(false)
+  completedAt DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@unique([userId, lessonId])
+  @@index([userId, courseId])
+}
+
+model License {
+  id           String    @id @default(cuid())
+  key          String    @unique
+  userId       String
+  user         User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  courseId     String?
+  course       Course?   @relation(fields: [courseId], references: [id])
+  wooOrderId   String?
+  wooProductId String?
+  wooSku       String?
+  status       String    @default("ACTIVE")
+  expiresAt    DateTime?
+  redeemedAt   DateTime  @default(now())
+  wpActivated  Boolean   @default(false)
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+}
+
+model Entitlement {
+  id        String    @id @default(cuid())
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  courseId  String
+  course    Course    @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  licenseId String?
+  expiresAt DateTime?
+  status    String    @default("ACTIVE")
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  @@unique([userId, courseId])
+}
+
+model Device {
+  id          String    @id @default(cuid())
+  userId      String
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  fingerprint String
+  label       String?
+  lastSeenAt  DateTime  @default(now())
+  revokedAt   DateTime?
+  createdAt   DateTime  @default(now())
+
+  @@unique([userId, fingerprint])
+}
+
+model PlaybackSession {
+  id         String    @id @default(cuid())
+  userId     String
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  deviceId   String?
+  lessonId   String?
+  token      String    @unique
+  lastBeatAt DateTime  @default(now())
+  endedAt    DateTime?
+  createdAt  DateTime  @default(now())
+}
+
+model RateLimitBucket {
+  id          String   @id @default(cuid())
+  key         String   @unique
+  count       Int      @default(0)
+  windowStart DateTime
+  updatedAt   DateTime @updatedAt
+}
+
+model SecurityEvent {
+  id        String   @id @default(cuid())
+  type      String
+  severity  String   @default("info")
+  message   String
+  actorId   String?
+  actorEmail String?
+  ip        String?
+  meta      String?
+  createdAt DateTime @default(now())
+
+  @@index([createdAt])
+  @@index([type])
+}
