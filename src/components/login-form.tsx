@@ -3,22 +3,22 @@
 import { useState } from "react";
 import { signIn } from "next-auth/react";
 import { useRouter } from "next/navigation";
+import { Spinner } from "@/components/loading";
+import { useToast } from "@/components/toast";
 import { licenseLoginErrorMessage } from "@/lib/license-login-messages";
 
 export function LoginForm() {
   const router = useRouter();
-  const [error, setError] = useState<string | null>(null);
+  const toast = useToast();
   const [pending, setPending] = useState(false);
 
   async function onSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     setPending(true);
-    setError(null);
     const fd = new FormData(e.currentTarget);
     const email = String(fd.get("email") ?? "");
     const licenseKey = String(fd.get("licenseKey") ?? "");
 
-    // Preflight so we can show Thai error messages (Auth.js only returns generic failure)
     const check = await fetch("/api/license-login", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -27,10 +27,11 @@ export function LoginForm() {
     const data = await check.json();
     if (!check.ok) {
       setPending(false);
-      setError(
+      toast.error(
+        "เข้าสู่ระบบไม่สำเร็จ",
         data.error
           ? licenseLoginErrorMessage(data.error, data.message)
-          : "เข้าสู่ระบบไม่สำเร็จ",
+          : undefined,
       );
       return;
     }
@@ -42,9 +43,10 @@ export function LoginForm() {
     });
     setPending(false);
     if (res?.error) {
-      setError("เข้าสู่ระบบไม่สำเร็จ");
+      toast.error("เข้าสู่ระบบไม่สำเร็จ");
       return;
     }
+    toast.ok("เข้าเรียนสำเร็จ", email);
     router.push("/library");
     router.refresh();
   }
@@ -52,29 +54,34 @@ export function LoginForm() {
   return (
     <form className="form" onSubmit={onSubmit}>
       <label>
-        อีเมล (จะถูกผูกกับคีย์ถาวร)
+        อีเมล (ผูกกับคีย์ครั้งแรกที่ใช้)
         <input
           name="email"
           type="email"
           required
           autoComplete="email"
           placeholder="คุณ@email.com"
+          disabled={pending}
         />
       </label>
       <label>
-        License key
+        คีย์จากร้าน
         <input
           name="licenseKey"
           required
           autoComplete="off"
           spellCheck={false}
-          placeholder="เช่น DEMO-COURSE-001"
+          placeholder="คีย์ที่ได้หลังซื้อจากร้าน"
+          disabled={pending}
         />
       </label>
       <button className="btn btn--primary" type="submit" disabled={pending}>
-        {pending ? "กำลังตรวจสอบ..." : "เข้าเรียนด้วยอีเมล + คีย์"}
+        {pending ? (
+          <Spinner size="sm" label="กำลังตรวจสอบ..." />
+        ) : (
+          "เข้าเรียน"
+        )}
       </button>
-      {error && <p className="form-error">{error}</p>}
     </form>
   );
 }

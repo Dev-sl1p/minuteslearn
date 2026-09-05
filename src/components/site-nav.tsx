@@ -38,7 +38,7 @@ export function SiteNav({ isAdmin, signedIn, signOutAction }: Props) {
       </Link>
       {isAdmin && (
         <Link href="/admin" onClick={() => setOpen(false)}>
-          Admin
+          หลังบ้าน
         </Link>
       )}
       <form action={signOutAction}>
@@ -53,7 +53,7 @@ export function SiteNav({ isAdmin, signedIn, signOutAction }: Props) {
       className="btn btn--primary"
       onClick={() => setOpen(false)}
     >
-      อีเมล + License key
+      อีเมล + คีย์
     </Link>
   );
 

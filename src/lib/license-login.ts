@@ -15,15 +15,15 @@ export async function loginWithEmailAndLicense(input: {
   instanceId?: string;
 }) {
   const email = input.email.trim().toLowerCase();
-  const key = input.licenseKey.trim().toUpperCase();
+  const key = input.licenseKey.trim();
   const instanceId = input.instanceId ?? `email:${email}`;
 
   if (!email || !key) {
     return { ok: false as const, error: "EMPTY" as const };
   }
 
-  const existing = await prisma.license.findUnique({
-    where: { key },
+  const existing = await prisma.license.findFirst({
+    where: { key: { equals: key, mode: "insensitive" } },
     include: { user: true },
   });
 
@@ -44,7 +44,11 @@ export async function loginWithEmailAndLicense(input: {
   // Optional: if Woo returns purchaser email, force first bind to match it
   const validated = await validateLicense(key);
   if (!validated || validated.status !== "active") {
-    return { ok: false as const, error: "INVALID_KEY" as const };
+    return {
+      ok: false as const,
+      error: "INVALID_KEY" as const,
+      wpStatus: validated?.status ?? "missing",
+    };
   }
   if (
     validated.customerEmail &&
@@ -65,7 +69,7 @@ export async function loginWithEmailAndLicense(input: {
 
   const redeemed = await redeemLicenseKey({
     userId: user.id,
-    licenseKey: key,
+    licenseKey: validated.key,
     instanceId,
   });
 

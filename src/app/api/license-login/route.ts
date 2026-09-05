@@ -66,7 +66,10 @@ export async function POST(req: Request) {
         message: `License login failed: ${result.error}`,
         actorEmail: email,
         ip,
-        meta: { error: result.error },
+        meta: {
+          error: result.error,
+          ...("wpStatus" in result ? { wpStatus: result.wpStatus } : {}),
+        },
       });
       return NextResponse.json(
         {

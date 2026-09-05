@@ -1,0 +1,11 @@
+.env
+.env.local
+.env.*.local
+backups
+.cursor
+.git
+*.db
+design-stich
+design.md
+scripts/fetch-stitch-design-system.mts
+scripts/fetch-stitch-screens.mts

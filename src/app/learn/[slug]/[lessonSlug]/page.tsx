@@ -8,6 +8,7 @@ import {
   isLessonUnlocked,
 } from "@/lib/progress";
 import { LearnWorkspace } from "@/components/learn-workspace";
+import { slugsMatch } from "@/lib/security";
 
 type Props = {
   params: Promise<{ slug: string; lessonSlug: string }>;
@@ -20,26 +21,36 @@ export default async function LessonPage({ params }: Props) {
     redirect(`/login?next=/learn/${slug}/${lessonSlug}`);
   }
 
+  const isAdmin = session.user.role === "ADMIN";
   const course = await prisma.course.findUnique({
     where: { slug },
-    include: { lessons: { orderBy: { order: "asc" } } },
+    include: {
+      modules: { orderBy: { order: "asc" } },
+      lessons: {
+        orderBy: { order: "asc" },
+        include: { resources: { orderBy: { order: "asc" } } },
+      },
+    },
   });
-  if (!course || !course.published) notFound();
+  if (!course) notFound();
+  if (!course.published && !isAdmin) notFound();
 
-  const allowed = await userHasCourseAccess(session.user.id, course.id);
+  const [allowed, completedIds] = await Promise.all([
+    userHasCourseAccess(session.user.id, course.id, { isAdmin }),
+    getCompletedLessonIds(session.user.id, course.id),
+  ]);
   if (!allowed) redirect(`/learn/${slug}`);
 
-  const lesson = course.lessons.find((l) => l.slug === lessonSlug);
+  const lesson = course.lessons.find((l) => slugsMatch(l.slug, lessonSlug));
   if (!lesson) notFound();
 
-  const completedIds = await getCompletedLessonIds(session.user.id, course.id);
   const gates = course.lessons.map((l) => ({
     id: l.id,
     slug: l.slug,
     order: l.order,
   }));
 
-  if (!isLessonUnlocked(gates, lesson.id, completedIds)) {
+  if (!isAdmin && !isLessonUnlocked(gates, lesson.id, completedIds)) {
     const fallback = firstUnlockedIncomplete(gates, completedIds);
     redirect(`/learn/${slug}/${fallback?.slug ?? course.lessons[0]?.slug}`);
   }
@@ -48,13 +59,24 @@ export default async function LessonPage({ params }: Props) {
     <LearnWorkspace
       courseTitle={course.title}
       courseSlug={course.slug}
+      isAdmin={isAdmin}
+      modules={course.modules.map((m) => ({
+        id: m.id,
+        title: m.title,
+        order: m.order,
+      }))}
       lesson={{
         id: lesson.id,
         title: lesson.title,
         slug: lesson.slug,
         description: lesson.description,
         order: lesson.order,
+        moduleId: lesson.moduleId,
         durationSec: lesson.durationSec,
+        resources: lesson.resources.map((r) => ({
+          id: r.id,
+          title: r.title,
+        })),
       }}
       lessons={course.lessons.map((l) => ({
         id: l.id,
@@ -62,7 +84,9 @@ export default async function LessonPage({ params }: Props) {
         slug: l.slug,
         description: l.description,
         order: l.order,
+        moduleId: l.moduleId,
         durationSec: l.durationSec,
+        resources: l.resources.map((r) => ({ id: r.id, title: r.title })),
       }))}
       completedLessonIds={[...completedIds]}
     />

@@ -1,7 +1,7 @@
 import { randomBytes } from "crypto";
 import { prisma } from "@/lib/db";
 
-const HEARTBEAT_STALE_MS = 90_000;
+const HEARTBEAT_STALE_MS = 6 * 60 * 60 * 1000;
 
 export async function startPlaybackSession(input: {
   userId: string;

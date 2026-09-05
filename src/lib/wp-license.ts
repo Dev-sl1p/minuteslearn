@@ -5,7 +5,13 @@
  * Modes:
  * - mock: accept DEMO-* keys for local/dev without WP
  * - live: call WP REST API with consumer key/secret
+ *
+ * On Vercel production, mock is forced off unless ALLOW_MOCK_LICENSES=true.
+ *
+ * LMFWC v2 responses use camelCase and numeric status:
+ * 1 = sold, 2 = delivered, 3 = active, 4 = inactive.
  */
+import { licenseMode } from "@/lib/env";
 
 export type WpLicenseInfo = {
   key: string;
@@ -42,8 +48,11 @@ const MOCK_KEYS: Record<
   },
 };
 
+/** LMFWC LicenseStatus enum */
+type LmfwcNumericStatus = 1 | 2 | 3 | 4;
+
 function mode() {
-  return (process.env.WP_LICENSE_MODE ?? "mock").toLowerCase();
+  return licenseMode();
 }
 
 function authHeader() {
@@ -54,26 +63,153 @@ function authHeader() {
   return `Basic ${token}`;
 }
 
+function asRecord(value: unknown): Record<string, unknown> | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  return value as Record<string, unknown>;
+}
+
+function pickScalar(
+  record: Record<string, unknown>,
+  keys: string[],
+): unknown {
+  for (const key of keys) {
+    if (key in record && record[key] != null && record[key] !== "") {
+      return record[key];
+    }
+  }
+  return undefined;
+}
+
+function pickString(
+  record: Record<string, unknown>,
+  keys: string[],
+): string | undefined {
+  const value = pickScalar(record, keys);
+  if (value == null) return undefined;
+  const text = String(value).trim();
+  return text || undefined;
+}
+
+function pickNumber(
+  record: Record<string, unknown>,
+  keys: string[],
+): number | undefined {
+  const value = pickScalar(record, keys);
+  if (value == null || value === "") return undefined;
+  const n = typeof value === "number" ? value : Number(value);
+  return Number.isFinite(n) ? n : undefined;
+}
+
+function asNumericStatus(raw: unknown): LmfwcNumericStatus | null {
+  const n = typeof raw === "number" ? raw : Number(String(raw).trim());
+  if (n === 1 || n === 2 || n === 3 || n === 4) return n;
+  return null;
+}
+
 function normalizeStatus(raw: unknown): WpLicenseInfo["status"] {
-  const s = String(raw ?? "unknown").toLowerCase();
-  if (s === "active" || s === "sold" || s === "delivered") return "active";
-  if (s === "inactive") return "inactive";
-  if (s === "expired") return "expired";
-  if (s === "disabled") return "disabled";
-  return "unknown";
+  const numeric = asNumericStatus(raw);
+  if (numeric != null) {
+    switch (numeric) {
+      case 1: // sold
+      case 2: // delivered
+      case 3: // active
+        return "active";
+      case 4: // inactive
+        return "inactive";
+      default: {
+        const _exhaustive: never = numeric;
+        return _exhaustive;
+      }
+    }
+  }
+
+  const s = String(raw ?? "")
+    .toLowerCase()
+    .trim();
+  switch (s) {
+    case "active":
+    case "sold":
+    case "delivered":
+      return "active";
+    case "inactive":
+      return "inactive";
+    case "expired":
+      return "expired";
+    case "disabled":
+      return "disabled";
+    default:
+      return "unknown";
+  }
+}
+
+function applyExpiry(
+  status: WpLicenseInfo["status"],
+  expiresAt: string | null,
+): WpLicenseInfo["status"] {
+  if (!expiresAt || status === "inactive" || status === "disabled") {
+    return status;
+  }
+  const exp = Date.parse(expiresAt.replace(" ", "T"));
+  if (!Number.isNaN(exp) && exp < Date.now()) return "expired";
+  return status;
+}
+
+/** Parse an LMFWC retrieve/validate/activate payload (camelCase or snake_case). */
+export function parseWpLicenseData(
+  payload: unknown,
+  fallbackKey: string,
+): WpLicenseInfo | null {
+  const root = asRecord(payload);
+  if (!root) return null;
+  const nested = asRecord(root.data);
+  const data = nested ?? root;
+  if (
+    !("status" in data) &&
+    !("licenseKey" in data) &&
+    !("license_key" in data) &&
+    !("productId" in data) &&
+    !("product_id" in data)
+  ) {
+    return null;
+  }
+
+  const expiresAt =
+    pickString(data, ["expiresAt", "expires_at"]) ?? null;
+  const status = applyExpiry(normalizeStatus(data.status), expiresAt);
+
+  if (status === "unknown") {
+    console.warn("Unrecognized LMFWC license status", {
+      status: data.status,
+      fields: Object.keys(data),
+    });
+  }
+
+  return {
+    key: pickString(data, ["licenseKey", "license_key"]) ?? fallbackKey,
+    status,
+    productId: pickString(data, ["productId", "product_id"]),
+    productSku: pickString(data, ["productSku", "product_sku", "sku"]),
+    orderId: pickString(data, ["orderId", "order_id"]),
+    customerEmail:
+      pickString(data, ["userEmail", "user_email", "email"]) ?? null,
+    expiresAt,
+    timesActivated: pickNumber(data, ["timesActivated", "times_activated"]),
+    timesActivatedMax:
+      pickNumber(data, ["timesActivatedMax", "times_activated_max"]) ?? null,
+  };
 }
 
 export async function validateLicense(
   licenseKey: string,
 ): Promise<WpLicenseInfo | null> {
-  const key = licenseKey.trim().toUpperCase();
+  const key = licenseKey.trim();
   if (!key) return null;
 
   if (mode() === "mock") {
-    const mock = MOCK_KEYS[key];
+    const mock = MOCK_KEYS[key.toUpperCase()];
     if (!mock) return null;
     return {
-      key,
+      key: key.toUpperCase(),
       status: "active",
       productId: mock.productId,
       productSku: mock.productSku,
@@ -101,40 +237,14 @@ export async function validateLicense(
     throw new Error(`WP validate failed: ${res.status}`);
   }
 
-  const json = (await res.json()) as {
-    data?: {
-      license_key?: string;
-      status?: string;
-      product_id?: string | number;
-      order_id?: string | number;
-      expires_at?: string | null;
-      timesActivated?: number;
-      timesActivatedMax?: number | null;
-      user_email?: string | null;
-      email?: string | null;
-    };
-  };
-
-  const data = json.data;
-  if (!data) return null;
-
-  return {
-    key: String(data.license_key ?? key),
-    status: normalizeStatus(data.status),
-    productId: data.product_id != null ? String(data.product_id) : undefined,
-    orderId: data.order_id != null ? String(data.order_id) : undefined,
-    customerEmail: data.user_email ?? data.email ?? null,
-    expiresAt: data.expires_at ?? null,
-    timesActivated: data.timesActivated,
-    timesActivatedMax: data.timesActivatedMax ?? null,
-  };
+  return parseWpLicenseData(await res.json(), key);
 }
 
 export async function activateLicense(
   licenseKey: string,
   instance: string,
 ): Promise<WpActivateResult> {
-  const key = licenseKey.trim().toUpperCase();
+  const key = licenseKey.trim();
 
   if (mode() === "mock") {
     const info = await validateLicense(key);
@@ -168,7 +278,8 @@ export async function activateLicense(
     };
   }
 
-  const info = await validateLicense(key);
+  const fromActivate = parseWpLicenseData(await res.json(), key);
+  const info = fromActivate ?? (await validateLicense(key));
   return {
     ok: true,
     license: info ?? { key, status: "active" },

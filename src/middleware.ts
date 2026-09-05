@@ -1,18 +1,17 @@
+import NextAuth from "next-auth";
 import { NextResponse } from "next/server";
-import type { NextRequest } from "next/server";
-import { getToken } from "next-auth/jwt";
+import { authConfig } from "@/lib/auth.config";
 
-export async function middleware(req: NextRequest) {
+const { auth } = NextAuth(authConfig);
+
+export default auth((req) => {
   const { pathname } = req.nextUrl;
+  const session = req.auth;
 
+  // Always allow the admin login page (page itself redirects if already ADMIN)
   if (pathname.startsWith("/admin/login")) {
     return NextResponse.next();
   }
-
-  const token = await getToken({
-    req,
-    secret: process.env.AUTH_SECRET,
-  });
 
   const needsAuth =
     pathname.startsWith("/library") ||
@@ -22,7 +21,7 @@ export async function middleware(req: NextRequest) {
     pathname === "/admin" ||
     pathname.startsWith("/admin/");
 
-  if (needsAuth && !token) {
+  if (needsAuth && !session?.user) {
     const url = req.nextUrl.clone();
     url.pathname = pathname.startsWith("/admin") ? "/admin/login" : "/login";
     url.searchParams.set("next", pathname);
@@ -31,7 +30,7 @@ export async function middleware(req: NextRequest) {
 
   if (
     (pathname === "/admin" || pathname.startsWith("/admin/")) &&
-    token?.role !== "ADMIN"
+    session?.user?.role !== "ADMIN"
   ) {
     const url = req.nextUrl.clone();
     url.pathname = "/admin/login";
@@ -39,7 +38,7 @@ export async function middleware(req: NextRequest) {
   }
 
   return NextResponse.next();
-}
+});
 
 export const config = {
   matcher: [

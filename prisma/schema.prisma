@@ -62,25 +62,41 @@ model VerificationToken {
 }
 
 model Course {
-  id           String        @id @default(cuid())
+  id           String         @id @default(cuid())
   title        String
-  slug         String        @unique
+  slug         String         @unique
   description  String?
   coverUrl     String?
   wooProductId String?
   wooSku       String?
-  published    Boolean       @default(false)
+  published    Boolean        @default(false)
+  modules      CourseModule[]
   lessons      Lesson[]
   entitlements Entitlement[]
   licenses     License[]
-  createdAt    DateTime      @default(now())
-  updatedAt    DateTime      @updatedAt
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
+}
+
+model CourseModule {
+  id        String   @id @default(cuid())
+  courseId  String
+  course    Course   @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  title     String
+  order     Int      @default(0)
+  lessons   Lesson[]
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([courseId, order])
 }
 
 model Lesson {
   id            String           @id @default(cuid())
   courseId      String
   course        Course           @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  moduleId      String?
+  module        CourseModule?    @relation(fields: [moduleId], references: [id], onDelete: SetNull)
   title         String
   slug          String
   description   String?
@@ -88,10 +104,28 @@ model Lesson {
   streamAssetId String?
   durationSec   Int?
   progress      LessonProgress[]
+  resources     LessonResource[]
   createdAt     DateTime         @default(now())
   updatedAt     DateTime         @updatedAt
 
   @@unique([courseId, slug])
+  @@index([moduleId])
+}
+
+model LessonResource {
+  id          String   @id @default(cuid())
+  lessonId    String
+  lesson      Lesson   @relation(fields: [lessonId], references: [id], onDelete: Cascade)
+  title       String
+  storagePath String?
+  url         String?
+  mimeType    String?
+  sizeBytes   Int?
+  order       Int      @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([lessonId, order])
 }
 
 model LessonProgress {

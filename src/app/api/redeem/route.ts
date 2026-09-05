@@ -65,15 +65,15 @@ export async function POST(req: Request) {
         meta: { error: result.error },
       });
       const messages: Record<string, string> = {
-        EMPTY_KEY: "กรุณาใส่ license key",
+        EMPTY_KEY: "กรุณาใส่คีย์จากร้าน",
         ALREADY_YOURS: "คีย์นี้ถูกผูกกับบัญชีคุณแล้ว",
         ALREADY_REDEEMED: "คีย์นี้ถูกใช้โดยบัญชีอื่นแล้ว",
         INVALID_KEY: "คีย์ไม่ถูกต้องหรือหมดอายุ",
-        ACTIVATION_LIMIT: "คีย์นี้ถูก activate ครบจำนวนแล้ว",
+        ACTIVATION_LIMIT: "คีย์นี้ถูกเปิดใช้งานครบจำนวนแล้ว",
         NO_COURSE_MAPPING:
-          "ยังไม่ได้ผูกสินค้า WooCommerce กับคอร์ส — ติดต่อแอดมิน",
+          "ยังไม่ได้ผูกสินค้าจากร้านกับคอร์ส — ติดต่อแอดมิน",
         WP_ACTIVATE_FAILED:
-          result.message ?? "เปิดใช้งานคีย์บน WordPress ไม่สำเร็จ",
+          result.message ?? "เปิดใช้งานคีย์บนระบบร้านไม่สำเร็จ",
       };
       return NextResponse.json(
         { error: messages[result.error] ?? result.error },
@@ -109,7 +109,7 @@ export async function POST(req: Request) {
       ip,
     });
     return NextResponse.json(
-      { error: "Redeem failed — check WordPress API config" },
+      { error: "ใส่คีย์ไม่สำเร็จ — ติดต่อแอดมิน" },
       { status: 500 },
     );
   }

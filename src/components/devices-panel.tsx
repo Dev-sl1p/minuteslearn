@@ -1,6 +1,9 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { Icon } from "@/components/icon";
+import { LoadingBlock, Spinner } from "@/components/loading";
+import { useToast } from "@/components/toast";
 import { getDeviceFingerprint, getDeviceLabel } from "@/lib/fingerprint";
 
 type Device = {
@@ -12,92 +15,154 @@ type Device = {
 };
 
 export function DevicesPanel() {
+  const toast = useToast();
   const [devices, setDevices] = useState<Device[]>([]);
   const [max, setMax] = useState(2);
-  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [pendingId, setPendingId] = useState<string | null>(null);
   const [currentFp, setCurrentFp] = useState("");
 
   async function load() {
     const res = await fetch("/api/devices");
     const data = await res.json();
     if (!res.ok) {
-      setError(data.error ?? "โหลดไม่สำเร็จ");
+      toast.error("โหลดอุปกรณ์ไม่สำเร็จ", data.error);
+      setLoading(false);
       return;
     }
     setDevices(data.devices);
     setMax(data.maxDevices);
+    setLoading(false);
   }
 
   useEffect(() => {
     setCurrentFp(getDeviceFingerprint());
-    void load();
-    void fetch("/api/devices", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        fingerprint: getDeviceFingerprint(),
-        label: getDeviceLabel(),
-      }),
-    }).then(() => load());
+    void (async () => {
+      const res = await fetch("/api/devices", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          fingerprint: getDeviceFingerprint(),
+          label: getDeviceLabel(),
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (Array.isArray(data.devices)) {
+        setDevices(data.devices);
+        setMax(data.maxDevices ?? 2);
+        setLoading(false);
+        if (!res.ok && data.error) {
+          toast.error("ลงทะเบียนอุปกรณ์ไม่สำเร็จ", data.error);
+        }
+        return;
+      }
+      await load();
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   async function revoke(id: string) {
+    setPendingId(id);
     const res = await fetch(`/api/devices?id=${id}`, { method: "DELETE" });
+    setPendingId(null);
     if (!res.ok) {
       const data = await res.json();
-      setError(data.error ?? "ปลดอุปกรณ์ไม่สำเร็จ");
+      toast.error("ปลดอุปกรณ์ไม่สำเร็จ", data.error);
       return;
     }
+    toast.ok("ปลดอุปกรณ์แล้ว");
     await load();
   }
 
+  if (loading) {
+    return <LoadingBlock label="กำลังโหลดรายการอุปกรณ์..." />;
+  }
+
+  const active = devices.filter((d) => !d.revokedAt);
+  const revoked = devices.filter((d) => d.revokedAt);
+
   return (
-    <div className="stack">
-      <p className="muted">
-        ใช้อุปกรณ์ได้สูงสุด {max} เครื่อง · fingerprint ปัจจุบัน:{" "}
-        <code>{currentFp.slice(0, 18)}…</code>
-      </p>
-      {error && <p className="form-error">{error}</p>}
-      <div className="panel" style={{ overflowX: "auto" }}>
-        <table className="table">
-          <thead>
-            <tr>
-              <th>อุปกรณ์</th>
-              <th>เห็นล่าสุด</th>
-              <th>สถานะ</th>
-              <th />
-            </tr>
-          </thead>
-          <tbody>
-            {devices.map((d) => (
-              <tr key={d.id}>
-                <td>
-                  {d.label ?? "Device"}
-                  {d.fingerprint === currentFp ? " (เครื่องนี้)" : ""}
-                </td>
-                <td>{new Date(d.lastSeenAt).toLocaleString("th-TH")}</td>
-                <td>
-                  {d.revokedAt ? (
-                    <span className="badge badge--bad">ระงับ</span>
-                  ) : (
-                    <span className="badge badge--ok">ใช้งานได้</span>
-                  )}
-                </td>
-                <td>
-                  {!d.revokedAt && (
-                    <button
-                      type="button"
-                      className="btn btn--danger"
-                      onClick={() => revoke(d.id)}
-                    >
-                      ปลด
-                    </button>
-                  )}
-                </td>
-              </tr>
+    <div className="stack page-enter">
+      <div className="device-panel panel anim-rise">
+        <div className="device-panel__head">
+          <div>
+            <h2 className="device-panel__title">อุปกรณ์ที่เข้าสู่ระบบ</h2>
+            <p className="device-panel__hint">
+              ใช้อุปกรณ์ได้สูงสุด {max} เครื่อง — หากไม่รู้จักเครื่องใด
+              ให้ปลดออกทันที
+            </p>
+          </div>
+        </div>
+
+        <div className="device-list">
+          {active.map((d) => {
+            const isCurrent = d.fingerprint === currentFp;
+            return (
+              <article
+                key={d.id}
+                className={`device-card${isCurrent ? " device-card--current" : ""}`}
+              >
+                <div
+                  className={`device-card__icon${isCurrent ? " device-card__icon--current" : ""}`}
+                  aria-hidden
+                >
+                  <Icon
+                    name={isCurrent ? "smartphone" : "devices"}
+                    filled={isCurrent}
+                    size={22}
+                  />
+                </div>
+                <div className="device-card__body">
+                  <div className="device-card__title-row">
+                    <h3>{d.label ?? "อุปกรณ์"}</h3>
+                    {isCurrent && (
+                      <span className="badge badge--current">เครื่องนี้</span>
+                    )}
+                  </div>
+                  <p className="muted">
+                    เห็นล่าสุด{" "}
+                    {new Date(d.lastSeenAt).toLocaleString("th-TH")}
+                  </p>
+                  <p className="device-card__fp muted">
+                    <code>{d.fingerprint.slice(0, 18)}…</code>
+                  </p>
+                </div>
+                {!isCurrent && (
+                  <button
+                    type="button"
+                    className="btn btn--ghost device-card__remove"
+                    disabled={pendingId === d.id}
+                    onClick={() => void revoke(d.id)}
+                  >
+                    {pendingId === d.id ? (
+                      <Spinner size="sm" label="..." />
+                    ) : (
+                      "ลบอุปกรณ์"
+                    )}
+                  </button>
+                )}
+              </article>
+            );
+          })}
+
+          {active.length === 0 && (
+            <p className="muted">ยังไม่มีอุปกรณ์ที่ลงทะเบียน</p>
+          )}
+        </div>
+
+        {revoked.length > 0 && (
+          <div className="device-list device-list--revoked">
+            <p className="muted">ระงับแล้ว ({revoked.length})</p>
+            {revoked.map((d) => (
+              <article key={d.id} className="device-card device-card--revoked">
+                <div className="device-card__body">
+                  <h3>{d.label ?? "อุปกรณ์"}</h3>
+                  <span className="badge badge--bad">ระงับแล้ว</span>
+                </div>
+              </article>
             ))}
-          </tbody>
-        </table>
+          </div>
+        )}
       </div>
     </div>
   );

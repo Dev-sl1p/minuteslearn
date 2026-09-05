@@ -39,7 +39,13 @@ export async function GET() {
 
   const courses = await prisma.course.findMany({
     include: {
-      lessons: { orderBy: { order: "asc" } },
+      modules: { orderBy: { order: "asc" } },
+      lessons: {
+        orderBy: { order: "asc" },
+        include: {
+          resources: { orderBy: { order: "asc" } },
+        },
+      },
       _count: { select: { entitlements: true, licenses: true } },
     },
     orderBy: { updatedAt: "desc" },
@@ -81,14 +87,22 @@ export async function POST(req: Request) {
           where: { id: parsed.data.id },
           data,
           include: {
-            lessons: { orderBy: { order: "asc" } },
+            modules: { orderBy: { order: "asc" } },
+            lessons: {
+              orderBy: { order: "asc" },
+              include: { resources: { orderBy: { order: "asc" } } },
+            },
             _count: { select: { entitlements: true, licenses: true } },
           },
         })
       : await prisma.course.create({
           data,
           include: {
-            lessons: { orderBy: { order: "asc" } },
+            modules: { orderBy: { order: "asc" } },
+            lessons: {
+              orderBy: { order: "asc" },
+              include: { resources: { orderBy: { order: "asc" } } },
+            },
             _count: { select: { entitlements: true, licenses: true } },
           },
         });

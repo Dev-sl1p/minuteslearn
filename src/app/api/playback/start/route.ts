@@ -5,7 +5,7 @@ import { prisma } from "@/lib/db";
 import { userHasCourseAccess } from "@/lib/redeem";
 import { registerDevice } from "@/lib/devices";
 import { cleanupStaleSessions, startPlaybackSession } from "@/lib/playback-session";
-import { createPlaybackToken } from "@/lib/stream";
+import { createPlaybackToken, PlaybackConfigError } from "@/lib/stream";
 
 const schema = z.object({
   lessonId: z.string().min(1),
@@ -33,23 +33,27 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Lesson not found" }, { status: 404 });
   }
 
-  const allowed = await userHasCourseAccess(session.user.id, lesson.courseId);
+  const allowed = await userHasCourseAccess(session.user.id, lesson.courseId, {
+    isAdmin: session.user.role === "ADMIN",
+  });
   if (!allowed) {
     return NextResponse.json({ error: "No access to this course" }, { status: 403 });
   }
 
+  const isAdmin = session.user.role === "ADMIN";
   const deviceResult = await registerDevice({
     userId: session.user.id,
     fingerprint: parsed.data.fingerprint,
     label: parsed.data.label,
+    skipLimit: isAdmin,
   });
   if (!deviceResult.ok) {
     return NextResponse.json(
       {
         error:
           deviceResult.error === "DEVICE_LIMIT"
-            ? "Device limit reached"
-            : "Device revoked",
+            ? "เต็มจำนวนอุปกรณ์แล้ว — ปลดเครื่องเก่าก่อน"
+            : "อุปกรณ์นี้ถูกระงับแล้ว",
       },
       { status: 403 },
     );
@@ -63,15 +67,32 @@ export async function POST(req: Request) {
     lessonId: lesson.id,
   });
 
-  const playback = await createPlaybackToken({
-    userId: session.user.id,
-    lessonId: lesson.id,
-    assetId: lesson.streamAssetId ?? "demo",
-  });
+  if (!lesson.streamAssetId?.trim()) {
+    return NextResponse.json(
+      { error: "บทเรียนนี้ยังไม่มีวิดีโอ — ติดต่อแอดมิน" },
+      { status: 503 },
+    );
+  }
 
-  return NextResponse.json({
-    sessionToken: playbackSession.token,
-    watermark: session.user.email ?? session.user.id,
-    playback,
-  });
+  try {
+    const playback = await createPlaybackToken({
+      userId: session.user.id,
+      lessonId: lesson.id,
+      assetId: lesson.streamAssetId,
+    });
+
+    return NextResponse.json({
+      sessionToken: playbackSession.token,
+      playback,
+    });
+  } catch (e) {
+    if (e instanceof PlaybackConfigError) {
+      return NextResponse.json({ error: e.message }, { status: 503 });
+    }
+    console.error(e);
+    return NextResponse.json(
+      { error: "ไม่สามารถเริ่มสตรีมได้" },
+      { status: 500 },
+    );
+  }
 }

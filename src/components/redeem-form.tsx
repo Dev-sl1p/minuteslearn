@@ -2,19 +2,18 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { Spinner } from "@/components/loading";
+import { useToast } from "@/components/toast";
 import { getDeviceFingerprint } from "@/lib/fingerprint";
 
 export function RedeemForm() {
   const router = useRouter();
-  const [error, setError] = useState<string | null>(null);
-  const [ok, setOk] = useState<string | null>(null);
+  const toast = useToast();
   const [pending, setPending] = useState(false);
 
   async function onSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     setPending(true);
-    setError(null);
-    setOk(null);
     const fd = new FormData(e.currentTarget);
     const licenseKey = String(fd.get("licenseKey") ?? "");
 
@@ -30,11 +29,11 @@ export function RedeemForm() {
     setPending(false);
 
     if (!res.ok) {
-      setError(data.error ?? "Redeem ไม่สำเร็จ");
+      toast.error("ใส่คีย์ไม่สำเร็จ", data.error);
       return;
     }
 
-    setOk(`เปิดคอร์ส "${data.course.title}" สำเร็จ`);
+    toast.ok("เปิดคอร์สแล้ว", data.course?.title);
     router.push(`/learn/${data.course.slug}`);
     router.refresh();
   }
@@ -42,20 +41,23 @@ export function RedeemForm() {
   return (
     <form className="form" onSubmit={onSubmit}>
       <label>
-        License key
+        คีย์จากร้าน
         <input
           name="licenseKey"
-          placeholder="เช่น DEMO-COURSE-001"
+          placeholder="คีย์ที่ได้หลังซื้อจากร้าน"
           required
           autoComplete="off"
           spellCheck={false}
+          disabled={pending}
         />
       </label>
       <button className="btn btn--primary" type="submit" disabled={pending}>
-        {pending ? "กำลังตรวจสอบ..." : "Redeem และผูกบัญชี"}
+        {pending ? (
+          <Spinner size="sm" label="กำลังตรวจสอบ..." />
+        ) : (
+          "เปิดคอร์ส"
+        )}
       </button>
-      {error && <p className="form-error">{error}</p>}
-      {ok && <p className="form-ok">{ok}</p>}
     </form>
   );
 }

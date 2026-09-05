@@ -41,9 +41,12 @@ export async function POST(req: Request) {
 
   if (!result.ok) {
     if (result.error === "DEVICE_LIMIT") {
+      const devices = await listDevices(session.user.id);
       return NextResponse.json(
         {
           error: `เต็มจำนวนอุปกรณ์แล้ว (สูงสุด ${maxDevices()} เครื่อง) — ปลดเครื่องเก่าก่อน`,
+          devices,
+          maxDevices: maxDevices(),
         },
         { status: 403 },
       );
@@ -54,7 +57,12 @@ export async function POST(req: Request) {
     );
   }
 
-  return NextResponse.json({ device: result.device });
+  const devices = await listDevices(session.user.id);
+  return NextResponse.json({
+    device: result.device,
+    devices,
+    maxDevices: maxDevices(),
+  });
 }
 
 export async function DELETE(req: Request) {

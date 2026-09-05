@@ -21,6 +21,7 @@ export async function SiteHeader() {
             width={40}
             height={40}
             className="brand__logo"
+            sizes="40px"
             priority
           />
           <span className="brand__name">MinutesLearn</span>

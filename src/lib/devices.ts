@@ -8,6 +8,8 @@ export async function registerDevice(input: {
   userId: string;
   fingerprint: string;
   label?: string;
+  /** Admins previewing courses bypass the device cap */
+  skipLimit?: boolean;
 }) {
   const existing = await prisma.device.findUnique({
     where: {
@@ -19,7 +21,7 @@ export async function registerDevice(input: {
   });
 
   if (existing) {
-    if (existing.revokedAt) {
+    if (existing.revokedAt && !input.skipLimit) {
       return { ok: false as const, error: "DEVICE_REVOKED" as const, device: existing };
     }
     const device = await prisma.device.update({
@@ -27,6 +29,7 @@ export async function registerDevice(input: {
       data: {
         lastSeenAt: new Date(),
         label: input.label ?? existing.label,
+        revokedAt: input.skipLimit ? null : existing.revokedAt,
       },
     });
     return { ok: true as const, device };
@@ -36,7 +39,7 @@ export async function registerDevice(input: {
     where: { userId: input.userId, revokedAt: null },
   });
 
-  if (activeCount >= maxDevices()) {
+  if (!input.skipLimit && activeCount >= maxDevices()) {
     return { ok: false as const, error: "DEVICE_LIMIT" as const, device: null };
   }
 

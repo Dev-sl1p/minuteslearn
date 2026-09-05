@@ -8,8 +8,10 @@ export default async function AdminLoginPage() {
 
   return (
     <div className="shell">
-      <h1 className="page-title">Admin login</h1>
-      <p className="page-lead">เข้าด้วยรหัสผ่านแอดมิน (แยกจากการล็อกอินด้วย license key)</p>
+      <h1 className="page-title">เข้าหลังบ้าน</h1>
+      <p className="page-lead">
+        ใช้รหัสผ่านแอดมิน (แยกจากการเข้าเรียนด้วยอีเมล + คีย์)
+      </p>
       <div className="panel">
         <AdminLoginForm />
       </div>

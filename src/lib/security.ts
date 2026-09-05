@@ -1,4 +1,7 @@
 import { z } from "zod";
+import { isGoogleDriveHost } from "@/lib/google-drive";
+import { isSupabaseStorageHost } from "@/lib/supabase-storage-url";
+import { extractYouTubeVideoId, isYouTubeHost } from "@/lib/youtube";
 
 /** Strip obvious HTML/script payloads from admin text fields */
 export function sanitizeText(input: string, max = 2000) {
@@ -40,7 +43,47 @@ function hostMatches(host: string, rule: string) {
   return host === rule || host.endsWith(`.${rule}`);
 }
 
+export function isPicInThHost(hostname: string) {
+  const host = hostname.toLowerCase();
+  return host === "pic.in.th" || host.endsWith(".pic.in.th");
+}
+
+function isPrivateOrLocalHost(hostname: string) {
+  const host = hostname.toLowerCase().replace(/^\[|\]$/g, "");
+  if (
+    host === "localhost" ||
+    host === "127.0.0.1" ||
+    host === "0.0.0.0" ||
+    host === "::1" ||
+    host.endsWith(".localhost") ||
+    host.endsWith(".local") ||
+    host.endsWith(".internal")
+  ) {
+    return true;
+  }
+  if (/^10\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(host)) return true;
+  if (/^192\.168\.\d{1,3}\.\d{1,3}$/.test(host)) return true;
+  if (/^169\.254\.\d{1,3}\.\d{1,3}$/.test(host)) return true;
+  const m = host.match(/^172\.(\d{1,3})\.\d{1,3}\.\d{1,3}$/);
+  if (m) {
+    const second = Number(m[1]);
+    if (second >= 16 && second <= 31) return true;
+  }
+  return false;
+}
+
+/** https image hosts safe to fetch server-side for course covers */
+export function isCoverFetchUrl(value: URL) {
+  return value.protocol === "https:" && !isPrivateOrLocalHost(value.hostname);
+}
+
 function hostAllowed(hostname: string) {
+  // Always allow Google Drive share links for the free Drive player path
+  if (isGoogleDriveHost(hostname)) return true;
+  if (isYouTubeHost(hostname)) return true;
+  // Free image host used for course cover thumbnails
+  if (isPicInThHost(hostname)) return true;
+  if (isSupabaseStorageHost(hostname)) return true;
   const allowed = allowedVideoHosts();
   if (!allowed || allowed.length === 0) return true;
   const host = hostname.toLowerCase();
@@ -52,6 +95,7 @@ export function isSafeVideoRef(value: string) {
   const v = value.trim();
   if (!v) return false;
   if (v.startsWith("/")) return true;
+  if (extractYouTubeVideoId(v)) return true;
   if (/^https:\/\//i.test(v)) {
     try {
       const u = new URL(v);
@@ -98,4 +142,20 @@ export const slugSchema = z
   .max(120)
   .regex(/^[a-z0-9\u0e00-\u0e7f]+(?:-[a-z0-9\u0e00-\u0e7f]+)*$/i, {
     message: "slug ไม่ถูกต้อง",
-  });
+  })
+  .transform((v) => v.normalize("NFC"));
+
+/** Compare URL / DB slugs safely (Thai NFC vs NFD, encoded params). */
+export function normalizeSlug(input: string) {
+  let value = input.trim();
+  try {
+    value = decodeURIComponent(value);
+  } catch {
+    /* already decoded */
+  }
+  return value.normalize("NFC");
+}
+
+export function slugsMatch(a: string, b: string) {
+  return normalizeSlug(a) === normalizeSlug(b);
+}

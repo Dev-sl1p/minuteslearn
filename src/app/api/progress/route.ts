@@ -32,7 +32,9 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Lesson not found" }, { status: 404 });
   }
 
-  const allowed = await userHasCourseAccess(session.user.id, lesson.courseId);
+  const allowed = await userHasCourseAccess(session.user.id, lesson.courseId, {
+    isAdmin: session.user.role === "ADMIN",
+  });
   if (!allowed) {
     return NextResponse.json({ error: "No access" }, { status: 403 });
   }

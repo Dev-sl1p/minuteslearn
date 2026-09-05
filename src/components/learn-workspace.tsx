@@ -2,7 +2,20 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
+import { Icon } from "@/components/icon";
+import { useToast } from "@/components/toast";
 import { VideoPlayer } from "@/components/video-player";
+
+export type LearnResource = {
+  id: string;
+  title: string;
+};
+
+export type LearnModule = {
+  id: string;
+  title: string;
+  order: number;
+};
 
 export type LearnLesson = {
   id: string;
@@ -10,7 +23,9 @@ export type LearnLesson = {
   slug: string;
   description: string | null;
   order: number;
+  moduleId: string | null;
   durationSec: number | null;
+  resources?: LearnResource[];
 };
 
 type Props = {
@@ -18,7 +33,9 @@ type Props = {
   courseSlug: string;
   lesson: LearnLesson;
   lessons: LearnLesson[];
+  modules?: LearnModule[];
   completedLessonIds: string[];
+  isAdmin?: boolean;
 };
 
 function formatDuration(sec: number | null) {
@@ -39,18 +56,58 @@ function isUnlocked(
   return completed.has(sorted[idx - 1].id);
 }
 
+function lessonLabel(
+  lessons: LearnLesson[],
+  modules: LearnModule[],
+  lessonId: string,
+) {
+  const sortedMods = [...modules].sort((a, b) => a.order - b.order);
+  const lesson = lessons.find((l) => l.id === lessonId);
+  if (!lesson) return "—";
+
+  if (lesson.moduleId) {
+    const mi = sortedMods.findIndex((m) => m.id === lesson.moduleId);
+    if (mi >= 0) {
+      const inMod = lessons
+        .filter((l) => l.moduleId === lesson.moduleId)
+        .sort((a, b) => a.order - b.order);
+      const li = inMod.findIndex((l) => l.id === lessonId);
+      if (li >= 0) return `${mi + 1}.${li + 1}`;
+    }
+  }
+
+  const orphans = lessons
+    .filter((l) => !l.moduleId)
+    .sort((a, b) => a.order - b.order);
+  const oi = orphans.findIndex((l) => l.id === lessonId);
+  if (oi >= 0 && sortedMods.length > 0) {
+    return `${sortedMods.length + 1}.${oi + 1}`;
+  }
+  return String(lessons.findIndex((l) => l.id === lessonId) + 1).padStart(
+    2,
+    "0",
+  );
+}
+
 export function LearnWorkspace({
   courseTitle,
   courseSlug,
   lesson,
   lessons,
+  modules = [],
   completedLessonIds,
+  isAdmin = false,
 }: Props) {
+  const toast = useToast();
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [isDesktop, setIsDesktop] = useState(false);
   const [completed, setCompleted] = useState(
     () => new Set(completedLessonIds),
+  );
+  const [downloadingId, setDownloadingId] = useState<string | null>(null);
+  const [openModuleKeys, setOpenModuleKeys] = useState<Set<string> | null>(
+    null,
   );
 
   useEffect(() => {
@@ -84,34 +141,139 @@ export function LearnWorkspace({
   const next = index >= 0 && index < lessons.length - 1 ? lessons[index + 1] : null;
   const currentDone = completed.has(lesson.id);
   const nextUnlocked = next
-    ? isUnlocked(lessons, next.id, completed)
+    ? isAdmin || isUnlocked(lessons, next.id, completed)
     : false;
+  const currentLabel = lessonLabel(lessons, modules, lesson.id);
 
-  const filtered = useMemo(() => {
+  const filteredIds = useMemo(() => {
     const q = query.trim().toLowerCase();
-    if (!q) return lessons;
-    return lessons.filter((l) => l.title.toLowerCase().includes(q));
+    if (!q) return new Set(lessons.map((l) => l.id));
+    return new Set(
+      lessons.filter((l) => l.title.toLowerCase().includes(q)).map((l) => l.id),
+    );
   }, [lessons, query]);
 
+  const sidebarGroups = useMemo(() => {
+    const sortedMods = [...modules].sort((a, b) => a.order - b.order);
+    const groups: {
+      key: string;
+      title: string | null;
+      moduleIndex: number | null;
+      lessons: LearnLesson[];
+    }[] = [];
+
+    for (let mi = 0; mi < sortedMods.length; mi++) {
+      const mod = sortedMods[mi];
+      const items = lessons
+        .filter((l) => l.moduleId === mod.id && filteredIds.has(l.id))
+        .sort((a, b) => a.order - b.order);
+      if (items.length === 0 && query.trim()) continue;
+      if (items.length === 0 && !query.trim()) {
+        groups.push({
+          key: mod.id,
+          title: mod.title,
+          moduleIndex: mi + 1,
+          lessons: [],
+        });
+        continue;
+      }
+      groups.push({
+        key: mod.id,
+        title: mod.title,
+        moduleIndex: mi + 1,
+        lessons: items,
+      });
+    }
+
+    const orphans = lessons
+      .filter((l) => !l.moduleId && filteredIds.has(l.id))
+      .sort((a, b) => a.order - b.order);
+    if (orphans.length > 0) {
+      groups.push({
+        key: "__none",
+        title: sortedMods.length > 0 ? "อื่นๆ" : null,
+        moduleIndex: sortedMods.length > 0 ? sortedMods.length + 1 : null,
+        lessons: orphans,
+      });
+    }
+
+    return groups;
+  }, [lessons, modules, filteredIds, query]);
+
+  const activeModuleKey = useMemo(() => {
+    const group = sidebarGroups.find((g) =>
+      g.lessons.some((l) => l.id === lesson.id),
+    );
+    return group?.key ?? null;
+  }, [sidebarGroups, lesson.id]);
+
+  useEffect(() => {
+    if (!activeModuleKey) return;
+    setOpenModuleKeys((prev) => {
+      if (prev == null) return new Set([activeModuleKey]);
+      if (prev.has(activeModuleKey)) return prev;
+      const next = new Set(prev);
+      next.add(activeModuleKey);
+      return next;
+    });
+  }, [activeModuleKey]);
+
+  function toggleModule(key: string) {
+    setOpenModuleKeys((prev) => {
+      const base = prev ?? new Set(activeModuleKey ? [activeModuleKey] : []);
+      const next = new Set(base);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  }
+
+  function isModuleOpen(key: string, hasTitle: boolean) {
+    if (!hasTitle) return true;
+    if (query.trim()) return true;
+    if (openModuleKeys == null) return key === activeModuleKey;
+    return openModuleKeys.has(key);
+  }
+
   const doneCount = lessons.filter((l) => completed.has(l.id)).length;
+  const progressPct =
+    lessons.length > 0 ? Math.round((doneCount / lessons.length) * 100) : 0;
+  const ringOffset = 100 - progressPct;
+  const resources = lesson.resources ?? [];
 
   function closeSidebarOnMobile() {
     if (!isDesktop) setSidebarOpen(false);
   }
 
+  async function downloadResource(id: string) {
+    setDownloadingId(id);
+    try {
+      const res = await fetch(`/api/learn/resources/${id}/download`);
+      const data = await res.json();
+      if (!res.ok) {
+        toast.error("ดาวน์โหลดไม่สำเร็จ", data.error);
+        return;
+      }
+      window.open(data.url as string, "_blank", "noopener,noreferrer");
+    } catch {
+      toast.error("ดาวน์โหลดไม่สำเร็จ");
+    } finally {
+      setDownloadingId(null);
+    }
+  }
+
   return (
-    <div className="learn-workspace">
+    <div className="learn-workspace page-enter">
       <header className="learn-topbar" aria-label="แถบควบคุมการเรียน">
         <div className="learn-topbar__left">
-          <Link
-            href={`/learn/${courseSlug}`}
-            className="learn-topbar__back"
-            title="กลับไปยังคอร์ส"
-          >
-            ←
+          <Link href="/library" className="learn-topbar__brand">
+            MinutesLearn
           </Link>
           <div className="learn-topbar__titles">
-            <p className="learn-topbar__course">{courseTitle}</p>
+            <p className="learn-topbar__course">
+              <Link href={`/learn/${courseSlug}`}>{courseTitle}</Link>
+              {isAdmin ? " · แอดมิน" : ""}
+            </p>
             <h1 className="learn-topbar__lesson">{lesson.title}</h1>
           </div>
         </div>
@@ -122,7 +284,7 @@ export function LearnWorkspace({
             onClick={() => setSidebarOpen((v) => !v)}
             aria-pressed={sidebarOpen}
           >
-            {sidebarOpen ? "ซ่อนบท" : "รายการบท"}
+            {sidebarOpen ? "ซ่อน" : "บทเรียน"}
           </button>
           {next ? (
             nextUnlocked ? (
@@ -147,6 +309,14 @@ export function LearnWorkspace({
 
       <div className={`learn-body ${sidebarOpen ? "" : "learn-body--wide"}`}>
         <section className="learn-main">
+          <nav className="learn-breadcrumb" aria-label="breadcrumb">
+            <Link href="/library">คอร์สของฉัน</Link>
+            <Icon name="chevron_right" size={16} className="learn-breadcrumb__sep" />
+            <Link href={`/learn/${courseSlug}`}>{courseTitle}</Link>
+            <Icon name="chevron_right" size={16} className="learn-breadcrumb__sep" />
+            <span className="learn-breadcrumb__current">{lesson.title}</span>
+          </nav>
+
           <VideoPlayer
             lessonId={lesson.id}
             compact
@@ -157,13 +327,18 @@ export function LearnWorkspace({
                 nextSet.add(lesson.id);
                 return nextSet;
               });
+              toast.ok("ผ่านบทนี้แล้ว", next ? "ไปบทถัดไปได้เลย" : "ครบทุกบทในคอร์ส");
             }}
           />
-          <div className="learn-meta">
+          <div className="learn-meta anim-rise">
+            <div className="learn-meta__tabs">
+              <span className="learn-meta__tab is-active">รายละเอียดเนื้อหา</span>
+              {resources.length > 0 ? (
+                <span className="learn-meta__tab">เอกสารประกอบ</span>
+              ) : null}
+            </div>
             <div className="learn-meta__row">
-              <span className="badge badge--current">
-                บทที่ {String(index + 1).padStart(2, "0")}
-              </span>
+              <span className="badge badge--current">บทที่ {currentLabel}</span>
               {currentDone ? (
                 <span className="badge badge--ok">ผ่านแล้ว</span>
               ) : (
@@ -177,9 +352,39 @@ export function LearnWorkspace({
             {lesson.description && (
               <p className="learn-meta__desc">{lesson.description}</p>
             )}
-            {!currentDone && (
+            {resources.length > 0 && (
+              <div className="learn-resources">
+                <p className="learn-resources__label">ไฟล์ประกอบ</p>
+                <ul className="learn-resources__list">
+                  {resources.map((r) => (
+                    <li key={r.id}>
+                      <button
+                        type="button"
+                        className="btn btn--ghost"
+                        disabled={downloadingId === r.id}
+                        onClick={() => void downloadResource(r.id)}
+                      >
+                        {downloadingId === r.id ? (
+                          "กำลังเตรียมลิงก์..."
+                        ) : (
+                          <>
+                            <Icon name="download" size={18} /> {r.title}
+                          </>
+                        )}
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+            {!currentDone && !isAdmin && (
               <p className="muted" style={{ marginTop: "0.75rem" }}>
                 ดูวิดีโอให้ถึงอย่างน้อย 90% เพื่อปลดล็อกบทถัดไป
+              </p>
+            )}
+            {isAdmin && (
+              <p className="muted" style={{ marginTop: "0.75rem" }}>
+                โหมดแอดมิน — ข้ามการล็อกบทได้
               </p>
             )}
             <div className="learn-meta__nav">
@@ -222,10 +427,38 @@ export function LearnWorkspace({
             )}
             <aside className="learn-sidebar" aria-label="ลำดับการเรียน">
               <div className="learn-sidebar__head">
-                <h2>ลำดับการเรียน</h2>
-                <p className="muted">
-                  ผ่าน {doneCount}/{lessons.length}
-                </p>
+                <div>
+                  <h2>เนื้อหาหลักสูตร</h2>
+                  <p className="muted">
+                    ความคืบหน้า: {doneCount}/{lessons.length} บท ({progressPct}%)
+                  </p>
+                </div>
+                <div
+                  className="learn-progress-ring"
+                  aria-label={`ความคืบหน้า ${progressPct}%`}
+                >
+                  <svg viewBox="0 0 36 36" aria-hidden>
+                    <circle
+                      className="learn-progress-ring__track"
+                      cx="18"
+                      cy="18"
+                      r="16"
+                      fill="none"
+                      strokeWidth="4"
+                    />
+                    <circle
+                      className="learn-progress-ring__value"
+                      cx="18"
+                      cy="18"
+                      r="16"
+                      fill="none"
+                      strokeWidth="4"
+                      strokeDasharray="100"
+                      strokeDashoffset={ringOffset}
+                    />
+                  </svg>
+                  <span>{progressPct}%</span>
+                </div>
               </div>
               <input
                 className="learn-sidebar__search"
@@ -236,53 +469,99 @@ export function LearnWorkspace({
                 aria-label="ค้นหาบทเรียน"
               />
               <nav className="learn-sidebar__list">
-                {filtered.map((l, i) => {
-                  const n = lessons.findIndex((x) => x.id === l.id) + 1 || i + 1;
-                  const active = l.id === lesson.id;
-                  const unlocked = isUnlocked(lessons, l.id, completed);
-                  const done = completed.has(l.id);
-                  const dur = formatDuration(l.durationSec);
-
-                  if (!unlocked) {
-                    return (
-                      <div
-                        key={l.id}
-                        className="learn-sidebar__item learn-sidebar__item--locked"
-                        aria-disabled
-                      >
-                        <span className="learn-sidebar__num">🔒</span>
-                        <span className="learn-sidebar__info">
-                          <span className="learn-sidebar__name">{l.title}</span>
-                          <span className="learn-sidebar__dur">
-                            ล็อก — ดูบทก่อนหน้าให้ครบ
-                          </span>
-                        </span>
-                      </div>
-                    );
-                  }
+                {sidebarGroups.map((group) => {
+                  const hasTitle = Boolean(group.title);
+                  const open = isModuleOpen(group.key, hasTitle);
 
                   return (
-                    <Link
-                      key={l.id}
-                      href={`/learn/${courseSlug}/${l.slug}`}
-                      className="learn-sidebar__item"
-                      data-active={active}
-                      aria-current={active ? "page" : undefined}
-                      onClick={closeSidebarOnMobile}
-                    >
-                      <span className="learn-sidebar__num">
-                        {done ? "✓" : String(n).padStart(2, "0")}
-                      </span>
-                      <span className="learn-sidebar__info">
-                        <span className="learn-sidebar__name">{l.title}</span>
-                        <span className="learn-sidebar__dur">
-                          {done ? "ผ่านแล้ว" : dur ?? "ยังไม่ครบ"}
+                  <div
+                    key={group.key}
+                    className={`learn-sidebar__group${open ? " is-open" : ""}`}
+                  >
+                    {hasTitle && (
+                      <button
+                        type="button"
+                        className="learn-sidebar__module"
+                        aria-expanded={open}
+                        onClick={() => toggleModule(group.key)}
+                      >
+                        <span>
+                          {group.moduleIndex != null
+                            ? `${group.moduleIndex}. `
+                            : ""}
+                          {group.title}
                         </span>
-                      </span>
-                    </Link>
+                        <Icon
+                          name={open ? "expand_less" : "expand_more"}
+                          size={18}
+                        />
+                      </button>
+                    )}
+                    {open &&
+                    group.lessons.map((l) => {
+                      const active = l.id === lesson.id;
+                      const unlocked =
+                        isAdmin || isUnlocked(lessons, l.id, completed);
+                      const done = completed.has(l.id);
+                      const dur = formatDuration(l.durationSec);
+
+                      if (!unlocked) {
+                        return (
+                          <div
+                            key={l.id}
+                            className="learn-sidebar__item learn-sidebar__item--locked"
+                            aria-disabled
+                          >
+                            <span className="learn-sidebar__num">
+                              <Icon name="lock" size={16} />
+                            </span>
+                            <span className="learn-sidebar__info">
+                              <span className="learn-sidebar__name">
+                                {l.title}
+                              </span>
+                              <span className="learn-sidebar__dur">
+                                ล็อก — ดูบทก่อนหน้าให้ครบ
+                              </span>
+                            </span>
+                          </div>
+                        );
+                      }
+
+                      return (
+                        <Link
+                          key={l.id}
+                          href={`/learn/${courseSlug}/${l.slug}`}
+                          className="learn-sidebar__item"
+                          data-active={active}
+                          aria-current={active ? "page" : undefined}
+                          onClick={closeSidebarOnMobile}
+                        >
+                          <span className="learn-sidebar__num">
+                            <Icon
+                              name={
+                                done
+                                  ? "check_circle"
+                                  : active
+                                    ? "play_arrow"
+                                    : "play_circle"
+                              }
+                              size={18}
+                              filled={done || active}
+                            />
+                          </span>
+                          <span className="learn-sidebar__info">
+                            <span className="learn-sidebar__name">{l.title}</span>
+                            <span className="learn-sidebar__dur">
+                              {done ? "ผ่านแล้ว" : dur ?? "ยังไม่ครบ"}
+                            </span>
+                          </span>
+                        </Link>
+                      );
+                    })}
+                  </div>
                   );
                 })}
-                {filtered.length === 0 && (
+                {filteredIds.size === 0 && (
                   <p className="muted" style={{ padding: "0.75rem" }}>
                     ไม่พบบทเรียน
                   </p>

@@ -33,13 +33,13 @@ export function getDeviceFingerprint() {
 }
 
 export function getDeviceLabel() {
-  if (typeof navigator === "undefined") return "Device";
+  if (typeof navigator === "undefined") return "อุปกรณ์";
   const ua = navigator.userAgent;
   if (/iPhone|iPad/i.test(ua)) return "iOS Safari";
   if (/Android/i.test(ua)) return "Android Browser";
   if (/Edg\//i.test(ua)) return "Edge";
   if (/Chrome\//i.test(ua)) return "Chrome";
-  if (/Firefox\//i.test(ua)) return "Firefox";
+  if (/Firefox/i.test(ua)) return "Firefox";
   if (/Safari\//i.test(ua)) return "Safari";
-  return "Browser";
+  return "เบราว์เซอร์";
 }

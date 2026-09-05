@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev",
+    "dev": "next dev --webpack",
     "build": "prisma generate && next build",
     "start": "next start",
     "lint": "eslint",
@@ -11,7 +11,10 @@
     "db:push": "prisma db push",
     "db:seed": "tsx prisma/seed.ts",
     "db:backup": "tsx scripts/backup-db.ts",
+    "db:prepare-prod": "tsx scripts/prepare-production.ts",
+    "admin:reset-password": "tsx scripts/reset-admin-password.ts",
     "db:studio": "prisma studio",
+    "storage:ensure-bucket": "tsx scripts/ensure-storage-bucket.ts",
     "postinstall": "prisma generate"
   },
   "prisma": {
@@ -20,9 +23,11 @@
   "dependencies": {
     "@auth/prisma-adapter": "^2.11.3",
     "@prisma/client": "6.19.0",
+    "@supabase/supabase-js": "^2.112.0",
     "bcryptjs": "^3.0.3",
     "hls.js": "^1.6.16",
     "jose": "^6.2.4",
+    "material-symbols": "^0.45.10",
     "next": "16.2.12",
     "next-auth": "^5.0.0-beta.32",
     "react": "19.2.4",

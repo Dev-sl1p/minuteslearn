@@ -4,6 +4,7 @@ import { PrismaAdapter } from "@auth/prisma-adapter";
 import bcrypt from "bcryptjs";
 import { z } from "zod";
 import { logSecurityEvent } from "@/lib/audit";
+import { authConfig } from "@/lib/auth.config";
 import { prisma } from "@/lib/db";
 import { loginWithEmailAndLicense } from "@/lib/license-login";
 import { rateLimit } from "@/lib/rate-limit";
@@ -19,13 +20,8 @@ const adminSchema = z.object({
 });
 
 export const { handlers, auth, signIn, signOut } = NextAuth({
+  ...authConfig,
   adapter: PrismaAdapter(prisma),
-  secret: process.env.AUTH_SECRET,
-  session: { strategy: "jwt" },
-  trustHost: true,
-  pages: {
-    signIn: "/login",
-  },
   // Stale cookies after AUTH_SECRET rotate decode as JWTSessionError;
   // Auth.js already clears them — don't surface as a red console error.
   logger: {
@@ -156,20 +152,4 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       },
     }),
   ],
-  callbacks: {
-    async jwt({ token, user }) {
-      if (user) {
-        token.id = user.id;
-        token.role = (user as { role?: string }).role ?? "USER";
-      }
-      return token;
-    },
-    async session({ session, token }) {
-      if (session.user) {
-        session.user.id = token.id as string;
-        session.user.role = (token.role as string) ?? "USER";
-      }
-      return session;
-    },
-  },
 });

@@ -6,12 +6,14 @@ export async function redeemLicenseKey(input: {
   licenseKey: string;
   instanceId: string;
 }) {
-  const key = input.licenseKey.trim().toUpperCase();
+  const key = input.licenseKey.trim();
   if (!key) {
     return { ok: false as const, error: "EMPTY_KEY" as const };
   }
 
-  const already = await prisma.license.findUnique({ where: { key } });
+  const already = await prisma.license.findFirst({
+    where: { key: { equals: key, mode: "insensitive" } },
+  });
   if (already) {
     if (already.userId === input.userId) {
       return { ok: false as const, error: "ALREADY_YOURS" as const };
@@ -47,7 +49,7 @@ export async function redeemLicenseKey(input: {
   const result = await prisma.$transaction(async (tx) => {
     const license = await tx.license.create({
       data: {
-        key,
+        key: validated.key || key,
         userId: input.userId,
         courseId: course.id,
         wooOrderId: validated.orderId,
@@ -92,7 +94,7 @@ async function findCourseForLicense(
 ) {
   if (productSku) {
     const bySku = await prisma.course.findFirst({
-      where: { wooSku: productSku },
+      where: { wooSku: { equals: productSku, mode: "insensitive" } },
     });
     if (bySku) return bySku;
   }
@@ -105,7 +107,23 @@ async function findCourseForLicense(
   return null;
 }
 
-export async function userHasCourseAccess(userId: string, courseId: string) {
+export async function isAdminUser(userId: string) {
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    select: { role: true },
+  });
+  return user?.role === "ADMIN";
+}
+
+export async function userHasCourseAccess(
+  userId: string,
+  courseId: string,
+  opts?: { isAdmin?: boolean },
+) {
+  // Prefer JWT role from session to skip an extra User lookup
+  if (opts?.isAdmin === true) return true;
+  if (opts?.isAdmin !== false && (await isAdminUser(userId))) return true;
+
   const entitlement = await prisma.entitlement.findUnique({
     where: { userId_courseId: { userId, courseId } },
   });

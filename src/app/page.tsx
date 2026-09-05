@@ -1,38 +1,51 @@
 import Image from "next/image";
 import Link from "next/link";
-import { auth } from "@/lib/auth";
+import { Suspense } from "react";
+import { HomeCta } from "@/components/home-cta";
 
-export default async function HomePage() {
-  const session = await auth();
+function CtaFallback() {
+  return (
+    <>
+      <Link href="/login" className="btn btn--primary">
+        เข้าเรียน
+      </Link>
+      <a
+        href="https://minutessharing.com/"
+        className="btn btn--ghost"
+        target="_blank"
+        rel="noreferrer"
+      >
+        ซื้อคอร์ส
+      </a>
+    </>
+  );
+}
 
+export default function HomePage() {
   return (
     <section className="hero">
       <div className="hero__brand">
         <Image
           src="/logo-minutes-sharing.png"
           alt="Minutes Sharing"
-          width={160}
-          height={160}
+          width={104}
+          height={104}
           className="hero__logo"
           priority
+          fetchPriority="high"
+          sizes="(max-width: 640px) 72px, 104px"
         />
         <p className="hero__brand-name">MinutesLearn</p>
       </div>
-      <h1>เรียนคอร์สวิดีโอด้วยอีเมล + license key</h1>
+      <h1>เรียนคอร์สออนไลน์</h1>
       <p>
-        ซื้อที่ minutessharing.com แล้วใส่อีเมลกับคีย์ที่นี่เพื่อเข้าเรียน
-        คีย์จะผูกกับอีเมลครั้งแรกที่ใช้ — ลดการแชร์คีย์ให้คนอื่น
+        ซื้อคอร์สที่ minutessharing.com แล้วนำอีเมลกับคีย์
+        มาเข้าเรียนที่นี่ คีย์จะผูกกับอีเมลครั้งแรกที่ใช้
       </p>
       <div className="hero__cta">
-        {session?.user ? (
-          <Link href="/library" className="btn btn--primary">
-            คอร์สของฉัน
-          </Link>
-        ) : (
-          <Link href="/login" className="btn btn--primary">
-            เข้าเรียนด้วยอีเมล + คีย์
-          </Link>
-        )}
+        <Suspense fallback={<CtaFallback />}>
+          <HomeCta />
+        </Suspense>
       </div>
     </section>
   );

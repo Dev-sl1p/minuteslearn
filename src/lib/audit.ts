@@ -12,6 +12,12 @@ export type SecurityEventType =
   | "COURSE_DELETE"
   | "LESSON_SAVE"
   | "LESSON_DELETE"
+  | "LESSON_REORDER"
+  | "MODULE_SAVE"
+  | "MODULE_DELETE"
+  | "RESOURCE_SAVE"
+  | "RESOURCE_UPLOAD"
+  | "RESOURCE_DELETE"
   | "RATE_LIMITED"
   | "SECURITY";
 
