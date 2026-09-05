@@ -34,9 +34,17 @@ export async function redeemLicenseKey(input: {
     return { ok: false as const, error: "ACTIVATION_LIMIT" as const };
   }
 
-  const course = await findCourseForLicense(validated.productId, validated.productSku);
+  const course = await findCourseForLicense(
+    validated.productId,
+    validated.productSku,
+  );
   if (!course) {
-    return { ok: false as const, error: "NO_COURSE_MAPPING" as const };
+    return {
+      ok: false as const,
+      error: "NO_COURSE_MAPPING" as const,
+      productId: validated.productId,
+      productSku: validated.productSku,
+    };
   }
 
   const activation = await activateLicense(key, input.instanceId);
@@ -100,9 +108,27 @@ async function findCourseForLicense(
   }
   if (productId) {
     const byId = await prisma.course.findFirst({
-      where: { wooProductId: productId },
+      where: { wooProductId: { equals: productId, mode: "insensitive" } },
     });
     if (byId) return byId;
+  }
+
+  // Single-product shops often issue LMFWC keys with a null productId.
+  const mapped = await prisma.course.findMany({
+    where: {
+      published: true,
+      OR: [{ wooProductId: { not: null } }, { wooSku: { not: null } }],
+    },
+  });
+  const usable = mapped.filter((course) => course.wooProductId || course.wooSku);
+  if (usable.length === 1) {
+    console.warn("License product not mapped; using the only Woo-linked course", {
+      productId,
+      productSku,
+      courseId: usable[0].id,
+      courseSlug: usable[0].slug,
+    });
+    return usable[0];
   }
   return null;
 }

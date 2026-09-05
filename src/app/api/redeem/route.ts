@@ -62,7 +62,12 @@ export async function POST(req: Request) {
         actorId: session.user.id,
         actorEmail: session.user.email,
         ip,
-        meta: { error: result.error },
+        meta: {
+          error: result.error,
+          ...("productId" in result
+            ? { productId: result.productId, productSku: result.productSku }
+            : {}),
+        },
       });
       const messages: Record<string, string> = {
         EMPTY_KEY: "กรุณาใส่คีย์จากร้าน",

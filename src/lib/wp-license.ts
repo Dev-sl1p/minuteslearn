@@ -37,13 +37,13 @@ const MOCK_KEYS: Record<
   { productSku: string; productId: string; orderId: string }
 > = {
   "DEMO-COURSE-001": {
-    productSku: "game-tilt-course",
-    productId: "1001",
+    productSku: "davinci-course",
+    productId: "119",
     orderId: "9001",
   },
   "DEMO-COURSE-002": {
-    productSku: "davinci-template",
-    productId: "1002",
+    productSku: "davinci-course",
+    productId: "119",
     orderId: "9002",
   },
 };
@@ -80,14 +80,23 @@ function pickScalar(
   return undefined;
 }
 
+function scalarToString(value: unknown): string | undefined {
+  if (value == null || value === "") return undefined;
+  if (typeof value === "object") {
+    const nested = asRecord(value);
+    if (!nested) return undefined;
+    return pickString(nested, ["id", "productId", "product_id", "sku"]);
+  }
+  const text = String(value).trim();
+  if (!text || text === "[object Object]") return undefined;
+  return text;
+}
+
 function pickString(
   record: Record<string, unknown>,
   keys: string[],
 ): string | undefined {
-  const value = pickScalar(record, keys);
-  if (value == null) return undefined;
-  const text = String(value).trim();
-  return text || undefined;
+  return scalarToString(pickScalar(record, keys));
 }
 
 function pickNumber(
@@ -184,11 +193,20 @@ export function parseWpLicenseData(
     });
   }
 
+  const product = asRecord(data.product) ?? asRecord(data.productData);
   return {
     key: pickString(data, ["licenseKey", "license_key"]) ?? fallbackKey,
     status,
-    productId: pickString(data, ["productId", "product_id"]),
-    productSku: pickString(data, ["productSku", "product_sku", "sku"]),
+    productId:
+      pickString(data, ["productId", "product_id"]) ??
+      (product
+        ? pickString(product, ["id", "productId", "product_id"])
+        : undefined),
+    productSku:
+      pickString(data, ["productSku", "product_sku", "sku"]) ??
+      (product
+        ? pickString(product, ["sku", "productSku", "product_sku"])
+        : undefined),
     orderId: pickString(data, ["orderId", "order_id"]),
     customerEmail:
       pickString(data, ["userEmail", "user_email", "email"]) ?? null,

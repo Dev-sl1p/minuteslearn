@@ -8,13 +8,26 @@ export function isProductionRuntime() {
   );
 }
 
+function hasWpLicenseCredentials() {
+  return Boolean(
+    process.env.WP_BASE_URL &&
+      process.env.WP_LM_CONSUMER_KEY &&
+      process.env.WP_LM_CONSUMER_SECRET,
+  );
+}
+
 export function licenseMode(): "mock" | "live" {
   const raw = (process.env.WP_LICENSE_MODE ?? "mock").toLowerCase();
-  // Never run mock license keys on production unless explicitly allowed
+  const allowMock = process.env.ALLOW_MOCK_LICENSES === "true";
+  const onVercel =
+    process.env.VERCEL_ENV === "production" ||
+    process.env.VERCEL_ENV === "preview" ||
+    Boolean(process.env.VERCEL);
+
+  // Preview shares the same shop keys as production — never mock there.
   if (
-    isProductionRuntime() &&
-    raw === "mock" &&
-    process.env.ALLOW_MOCK_LICENSES !== "true"
+    !allowMock &&
+    (isProductionRuntime() || (onVercel && hasWpLicenseCredentials()))
   ) {
     return "live";
   }

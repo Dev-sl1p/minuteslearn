@@ -78,6 +78,9 @@ export async function loginWithEmailAndLicense(input: {
       ok: false as const,
       error: redeemed.error,
       message: "message" in redeemed ? redeemed.message : undefined,
+      ...("productId" in redeemed
+        ? { productId: redeemed.productId, productSku: redeemed.productSku }
+        : {}),
     };
   }
 

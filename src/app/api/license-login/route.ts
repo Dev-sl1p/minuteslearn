@@ -69,6 +69,9 @@ export async function POST(req: Request) {
         meta: {
           error: result.error,
           ...("wpStatus" in result ? { wpStatus: result.wpStatus } : {}),
+          ...("productId" in result
+            ? { productId: result.productId, productSku: result.productSku }
+            : {}),
         },
       });
       return NextResponse.json(
