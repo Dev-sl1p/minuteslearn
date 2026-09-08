@@ -1,35 +1,17 @@
 "use client";
 
 const STORAGE_KEY = "ms_device_fp";
-
-function hashString(input: string) {
-  let h = 2166136261;
-  for (let i = 0; i < input.length; i++) {
-    h ^= input.charCodeAt(i);
-    h = Math.imul(h, 16777619);
-  }
-  return (h >>> 0).toString(16).padStart(8, "0");
-}
+let fallbackFingerprint: string | undefined;
 
 export function getDeviceFingerprint() {
   if (typeof window === "undefined") return "ssr";
-
-  const cached = localStorage.getItem(STORAGE_KEY);
-  if (cached) return cached;
-
-  const parts = [
-    navigator.userAgent,
-    navigator.language,
-    String(screen.width),
-    String(screen.height),
-    String(screen.colorDepth),
-    Intl.DateTimeFormat().resolvedOptions().timeZone,
-  ];
-  const fp = `fp_${hashString(parts.join("|"))}_${hashString(
-    navigator.userAgent.slice(0, 64),
-  )}`;
-  localStorage.setItem(STORAGE_KEY, fp);
-  return fp;
+  try {
+    const cached = localStorage.getItem(STORAGE_KEY);
+    if (cached && /^[a-zA-Z0-9_-]{8,128}$/.test(cached)) return cached;
+  } catch { /* Private browsing may disable persistent storage. */ }
+  const fingerprint = fallbackFingerprint ??= `fp_${crypto.randomUUID()}`;
+  try { localStorage.setItem(STORAGE_KEY, fingerprint); } catch { /* Use this tab's identity. */ }
+  return fingerprint;
 }
 
 export function getDeviceLabel() {

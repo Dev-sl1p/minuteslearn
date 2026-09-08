@@ -4,7 +4,6 @@ import { auth } from "@/lib/auth";
 import { listDevices, maxDevices, registerDevice, revokeDevice } from "@/lib/devices";
 
 const registerSchema = z.object({
-  fingerprint: z.string().min(8).max(128),
   label: z.string().max(80).optional(),
 });
 
@@ -14,7 +13,7 @@ export async function GET() {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const devices = await listDevices(session.user.id);
+  const devices = await listDevices(session.user.id, session.user.fingerprint);
   return NextResponse.json({
     devices,
     maxDevices: maxDevices(),
@@ -35,13 +34,14 @@ export async function POST(req: Request) {
 
   const result = await registerDevice({
     userId: session.user.id,
-    fingerprint: parsed.data.fingerprint,
+    fingerprint: session.user.fingerprint,
     label: parsed.data.label,
+    skipLimit: session.user.role === "ADMIN",
   });
 
   if (!result.ok) {
     if (result.error === "DEVICE_LIMIT") {
-      const devices = await listDevices(session.user.id);
+      const devices = await listDevices(session.user.id, session.user.fingerprint);
       return NextResponse.json(
         {
           error: `เต็มจำนวนอุปกรณ์แล้ว (สูงสุด ${maxDevices()} เครื่อง) — ปลดเครื่องเก่าก่อน`,
@@ -57,9 +57,8 @@ export async function POST(req: Request) {
     );
   }
 
-  const devices = await listDevices(session.user.id);
+  const devices = await listDevices(session.user.id, session.user.fingerprint);
   return NextResponse.json({
-    device: result.device,
     devices,
     maxDevices: maxDevices(),
   });
@@ -82,5 +81,5 @@ export async function DELETE(req: Request) {
     return NextResponse.json({ error: "Not found" }, { status: 404 });
   }
 
-  return NextResponse.json({ ok: true, device });
+  return NextResponse.json({ ok: true });
 }

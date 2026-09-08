@@ -48,8 +48,8 @@ export default async function LibraryPage() {
         })
       : Promise.resolve([]),
     prisma.lessonProgress.findMany({
-      where: { userId, completed: true },
-      select: { courseId: true, lessonId: true, updatedAt: true },
+      where: { userId },
+      select: { courseId: true, lessonId: true, updatedAt: true, completed: true },
     }),
   ]);
 
@@ -66,7 +66,7 @@ export default async function LibraryPage() {
   const completedByCourse = new Map<string, number>();
   const lastActivity = new Map<string, Date>();
   for (const row of completedRows) {
-    completedByCourse.set(
+    if (row.completed) completedByCourse.set(
       row.courseId,
       (completedByCourse.get(row.courseId) ?? 0) + 1,
     );
@@ -98,7 +98,7 @@ export default async function LibraryPage() {
         const percent = total > 0 ? Math.round((done / total) * 100) : 0;
         const completedIds = new Set(
           completedRows
-            .filter((r) => r.courseId === c.id)
+            .filter((r) => r.courseId === c.id && r.completed)
             .map((r) => r.lessonId),
         );
         const next =
@@ -126,7 +126,7 @@ export default async function LibraryPage() {
         const percent = total > 0 ? Math.round((done / total) * 100) : 0;
         const completedIds = new Set(
           completedRows
-            .filter((r) => r.courseId === e.courseId)
+            .filter((r) => r.courseId === e.courseId && r.completed)
             .map((r) => r.lessonId),
         );
         const next =
@@ -303,6 +303,12 @@ export default async function LibraryPage() {
                             style={{ width: `${item.percent}%` }}
                           />
                         </div>
+                      </div>
+                      <div className="course-card__foot">
+                        <span className="course-card__action">
+                          {item.percent > 0 ? "เรียนต่อ" : "เริ่มเรียน"}
+                          <Icon name="arrow_forward" size={16} />
+                        </span>
                       </div>
                     </div>
                   </Link>

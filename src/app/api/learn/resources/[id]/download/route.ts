@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { userHasCourseAccess } from "@/lib/redeem";
+import { userHasLessonAccess } from "@/lib/progress";
 import {
   getSupabaseAdmin,
   storageBucket,
@@ -20,7 +21,7 @@ export async function GET(_req: Request, { params }: Props) {
   const resource = await prisma.lessonResource.findUnique({
     where: { id },
     include: {
-      lesson: { select: { id: true, courseId: true } },
+      lesson: { select: { id: true, courseId: true, course: { select: { published: true } } } },
     },
   });
 
@@ -33,7 +34,8 @@ export async function GET(_req: Request, { params }: Props) {
     resource.lesson.courseId,
     { isAdmin: session.user.role === "ADMIN" },
   );
-  if (!allowed) {
+  if (!allowed || (!resource.lesson.course.published && session.user.role !== "ADMIN")
+    || !(await userHasLessonAccess(session.user.id, resource.lesson.id, resource.lesson.courseId, session.user.role === "ADMIN"))) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 

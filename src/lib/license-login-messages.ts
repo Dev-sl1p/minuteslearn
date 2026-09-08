@@ -1,6 +1,9 @@
 export function licenseLoginErrorMessage(error: string, message?: string) {
   const map: Record<string, string> = {
     EMPTY: "กรุณาใส่อีเมลและคีย์จากร้าน",
+    USE_EXISTING_KEY: "หากมีบัญชีแล้ว ให้เข้าสู่ระบบด้วยคีย์เดิม แล้วเพิ่มคีย์ใหม่ที่หน้าใส่คีย์",
+    RATE_LIMITED: "มีการลองเข้าสู่ระบบหลายครั้ง กรุณารอสักครู่แล้วลองใหม่",
+    SERVICE_UNAVAILABLE: "ติดต่อระบบร้านค้าไม่สำเร็จ กรุณาลองใหม่อีกครั้ง",
     REVOKED: "คีย์นี้ถูกระงับแล้ว",
     BOUND_OTHER_EMAIL:
       "คีย์นี้ถูกผูกกับอีเมลอื่นแล้ว — ใช้อีเมลที่เข้าใช้ครั้งแรก",
@@ -12,5 +15,5 @@ export function licenseLoginErrorMessage(error: string, message?: string) {
     ALREADY_REDEEMED: "คีย์นี้ถูกใช้โดยบัญชีอื่นแล้ว",
     ALREADY_YOURS: "คีย์นี้ผูกกับบัญชีนี้แล้ว",
   };
-  return map[error] ?? error;
+  return map[error] ?? "เข้าสู่ระบบไม่สำเร็จ กรุณาตรวจสอบอีเมลและคีย์";
 }

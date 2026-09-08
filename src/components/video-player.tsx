@@ -1,11 +1,11 @@
 "use client";
 
-import { useEffect, useRef, useState, useEffectEvent } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import Hls from "hls.js";
 import { Spinner } from "@/components/loading";
 import { useToast } from "@/components/toast";
 import { YouTubeHost } from "@/components/youtube-host";
-import { getDeviceFingerprint, getDeviceLabel } from "@/lib/fingerprint";
+import { getDeviceLabel } from "@/lib/fingerprint";
 import {
   extractGoogleDriveFileId,
   googleDriveDirectStreamUrl,
@@ -21,6 +21,8 @@ type Props = {
 
 type StartResponse = {
   sessionToken: string;
+  resumeAt?: number;
+  percent?: number;
   playback: {
     provider?: string;
     playbackUrl: string;
@@ -60,70 +62,67 @@ export function VideoPlayer({
   const hlsRef = useRef<Hls | null>(null);
   const lastReportRef = useRef(0);
   const completedRef = useRef(alreadyCompleted);
+  const onCompletedRef = useRef(onCompleted);
+  const resumeAtRef = useRef(0);
+  const requestIdRef = useRef<string | null>(null);
+  const [resumeAt, setResumeAt] = useState(0);
+  const [attempt, setAttempt] = useState(0);
+  useEffect(() => { onCompletedRef.current = onCompleted; }, [onCompleted]);
 
-  const onHeartbeatFail = useEffectEvent((message: string) => {
+  const onHeartbeatFail = useCallback((message: string) => {
     setBlocked(true);
     setError(message);
     videoRef.current?.pause();
-  });
+  }, []);
 
-  const renewPlaybackToken = useEffectEvent(async () => {
-    const res = await fetch("/api/playback/start", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        lessonId,
-        fingerprint: getDeviceFingerprint(),
-        label: getDeviceLabel(),
-      }),
-    });
-    const data = (await res.json()) as StartResponse;
-    if (!res.ok || !data.sessionToken) return false;
-    sessionTokenRef.current = data.sessionToken;
-    return true;
-  });
-
-  const reportProgress = useEffectEvent(
-    async (watchedSec: number, durationSec: number, forceComplete = false) => {
-      if (completedRef.current && !forceComplete) return;
+  const reportProgress = useCallback(
+    async (watchedSec: number, durationSec: number, flush = false) => {
+      if (completedRef.current && !flush) return;
       const now = Date.now();
-      if (!forceComplete && now - lastReportRef.current < 4000) return;
+      if (!flush && now - lastReportRef.current < 4000) return;
       lastReportRef.current = now;
-
-      const res = await fetch("/api/progress", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          lessonId,
-          watchedSec,
-          durationSec,
-          forceComplete,
-        }),
-      });
-      if (!res.ok) return;
-      const data = (await res.json()) as {
-        completed?: boolean;
-        percent?: number;
-      };
-      if (typeof data.percent === "number") {
-        setWatchPercent(Math.round(data.percent));
-      }
-      if (data.completed && !completedRef.current) {
-        completedRef.current = true;
-        setCompleted(true);
-        setWatchPercent(100);
-        onCompleted?.();
+      if (!sessionTokenRef.current) return;
+      try {
+        const res = await fetch("/api/progress", {
+          method: "POST",
+          signal: AbortSignal.timeout(12000),
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            lessonId,
+            watchedSec,
+            durationSec,
+            sessionToken: sessionTokenRef.current,
+          }),
+        });
+        if (!res.ok) {
+          if ([401, 403, 409].includes(res.status)) onHeartbeatFail("สิทธิ์หรือเซสชันนี้สิ้นสุดแล้ว กรุณาเปิดบทเรียนใหม่");
+          return;
+        }
+        const data = (await res.json()) as {
+          completed?: boolean;
+          percent?: number;
+        };
+        if (typeof data.percent === "number") {
+          setWatchPercent(Math.floor(data.percent));
+        }
+        if (data.completed && !completedRef.current) {
+          completedRef.current = true;
+          setCompleted(true);
+          setWatchPercent(100);
+          onCompletedRef.current?.();
+        }
+      } catch {
+        // Heartbeat handles a lost connection; progress retries on the next tick.
       }
     },
+    [lessonId, onHeartbeatFail],
   );
 
-  const attachProgressListeners = useEffectEvent((video: HTMLVideoElement) => {
+  const attachProgressListeners = useCallback((video: HTMLVideoElement) => {
     const onTimeUpdate = () => {
       const v = videoRef.current;
       if (!v || !v.duration || !Number.isFinite(v.duration)) return;
-      const pct = (v.currentTime / v.duration) * 100;
-      setWatchPercent(Math.min(100, Math.round(pct)));
-      void reportProgress(v.currentTime, v.duration, pct >= 90);
+      void reportProgress(v.currentTime, v.duration);
     };
     const onEnded = () => {
       const v = videoRef.current;
@@ -133,62 +132,63 @@ export function VideoPlayer({
     };
     video.addEventListener("timeupdate", onTimeUpdate);
     video.addEventListener("ended", onEnded);
+    const restorePosition = () => {
+      if (resumeAtRef.current > 0 && Number.isFinite(video.duration)) {
+        video.currentTime = Math.min(resumeAtRef.current, Math.max(0, video.duration - 1));
+      }
+    };
+    video.addEventListener("loadedmetadata", restorePosition, { once: true });
     (
       video as HTMLVideoElement & { __progressCleanup?: () => void }
     ).__progressCleanup = () => {
       video.removeEventListener("timeupdate", onTimeUpdate);
       video.removeEventListener("ended", onEnded);
+      video.removeEventListener("loadedmetadata", restorePosition);
     };
-  });
+  }, [reportProgress]);
 
-  const handleYouTubeProgress = useEffectEvent(
+  const handleYouTubeProgress = useCallback(
     (current: number, duration: number, ended: boolean) => {
       if (!duration || !Number.isFinite(duration) || duration <= 0) return;
-      const pct = (current / duration) * 100;
-      setWatchPercent(Math.min(100, Math.round(pct)));
       // YouTube getDuration() can be tiny in the first seconds — do not
       // treat that as 90% complete or the parent remounts the player.
-      const durationLooksReal = duration >= 15;
       void reportProgress(
         current,
         duration,
-        ended || (durationLooksReal && pct >= 90),
+        ended,
       );
     },
+    [reportProgress],
   );
-
-  useEffect(() => {
-    completedRef.current = alreadyCompleted;
-    if (alreadyCompleted) {
-      setCompleted(true);
-      setWatchPercent(100);
-    }
-  }, [alreadyCompleted]);
 
   useEffect(() => {
     let cancelled = false;
     let heartbeatTimer: ReturnType<typeof setInterval> | undefined;
+    const videoAtStart = videoRef.current;
 
     async function beat() {
       const token = sessionTokenRef.current;
       if (!token) return;
-      const hb = await fetch("/api/playback/heartbeat", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ sessionToken: token }),
-      });
-      if (hb.ok) return;
-      const body = (await hb.json().catch(() => ({}))) as {
-        reason?: string;
-        error?: string;
-      };
-      if (body.reason === "SUPERSEDED") {
-        onHeartbeatFail(
-          body.error ?? "เซสชันถูกปิดจากอุปกรณ์อื่น",
-        );
-        return;
+      try {
+        const hb = await fetch("/api/playback/heartbeat", {
+          method: "POST",
+          signal: AbortSignal.timeout(12000),
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ sessionToken: token }),
+        });
+        if (cancelled || hb.ok) return;
+        const body = (await hb.json().catch(() => ({}))) as {
+          reason?: string;
+          error?: string;
+        };
+        if (heartbeatTimer) clearInterval(heartbeatTimer);
+        onHeartbeatFail(body.error ?? "เซสชันนี้สิ้นสุดแล้ว กรุณากดเล่นต่ออีกครั้ง");
+      } catch {
+        if (!cancelled) {
+          if (heartbeatTimer) clearInterval(heartbeatTimer);
+          onHeartbeatFail("ขาดการเชื่อมต่อ ตรวจสอบอินเทอร์เน็ตแล้วกดเล่นต่อ");
+        }
       }
-      await renewPlaybackToken();
     }
 
     async function startHeartbeat() {
@@ -198,6 +198,7 @@ export function VideoPlayer({
     }
 
     async function boot() {
+      requestIdRef.current ??= crypto.randomUUID();
       setError(null);
       setBooting(true);
       setBlocked(false);
@@ -214,10 +215,11 @@ export function VideoPlayer({
       try {
         const res = await fetch("/api/playback/start", {
           method: "POST",
+          signal: AbortSignal.timeout(20000),
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             lessonId,
-            fingerprint: getDeviceFingerprint(),
+            requestId: requestIdRef.current,
             label: getDeviceLabel(),
           }),
         });
@@ -233,6 +235,9 @@ export function VideoPlayer({
         if (cancelled) return;
 
         sessionTokenRef.current = data.sessionToken;
+        resumeAtRef.current = Math.max(0, data.resumeAt ?? 0);
+        setResumeAt(resumeAtRef.current);
+        setWatchPercent(Math.floor(data.percent ?? 0));
         setProvider(data.playback.provider ?? "");
         const url = data.playback.playbackUrl;
 
@@ -325,18 +330,18 @@ export function VideoPlayer({
       if (heartbeatTimer) clearInterval(heartbeatTimer);
       hlsRef.current?.destroy();
       hlsRef.current = null;
-      const video = videoRef.current as
+      const video = videoAtStart as
         | (HTMLVideoElement & { __progressCleanup?: () => void })
         | null;
       video?.__progressCleanup?.();
     };
-  }, [lessonId]);
+  }, [attachProgressListeners, lessonId, onHeartbeatFail, toast, attempt]);
 
   async function markDriveComplete() {
     setMarkingDone(true);
-    await reportProgress(1, 1, true);
-    setMarkingDone(false);
-    toast.ok("บันทึกว่าดูจบแล้ว");
+    try {
+      await reportProgress(1, 1, true);
+    } finally { setMarkingDone(false); }
   }
 
   const isYouTube = provider === "youtube" && Boolean(youtubeVideoId);
@@ -356,13 +361,14 @@ export function VideoPlayer({
         {isYouTube && youtubeVideoId ? (
           <YouTubeHost
             videoId={youtubeVideoId}
+            startSeconds={resumeAt}
             paused={blocked}
             onReady={() => setBooting(false)}
             onProgress={handleYouTubeProgress}
             onError={() => {
               setBooting(false);
               setError(
-                "เล่นวิดีโอ YouTube ไม่ได้ — ตรวจสอบว่าตั้ง Unlisted และอนุญาตฝังบนโดเมนนี้",
+                "วิดีโอนี้ยังเล่นไม่ได้ ลองใหม่อีกครั้งหรือติดต่อผู้ดูแลคอร์ส",
               );
             }}
           />
@@ -370,7 +376,7 @@ export function VideoPlayer({
           <>
             <iframe
               className="player__video player__drive"
-              src={driveUrl}
+              src={blocked ? "about:blank" : driveUrl}
               title="Google Drive video"
               allow="autoplay; encrypted-media; fullscreen"
               allowFullScreen
@@ -385,7 +391,7 @@ export function VideoPlayer({
             ref={videoRef}
             className="player__video"
             controls={!blocked}
-            controlsList="nodownload noplaybackrate"
+            controlsList="nodownload"
             disablePictureInPicture
             playsInline
             preload="metadata"
@@ -406,9 +412,9 @@ export function VideoPlayer({
 
         {blocked && (
           <div className="player__blackout">
-            <p className="player__blackout-title">เซสชันถูกระงับ</p>
+            <p className="player__blackout-title">มีการเล่นจากหน้าต่างหรืออุปกรณ์อื่น</p>
             <p className="player__blackout-desc">
-              {error || "มีการเปิดดูจากที่อื่น"}
+              {error || "เปิดดูได้ทีละหนึ่งหน้าต่างหรือเครื่องเดียวในเวลาเดียวกัน"}
             </p>
           </div>
         )}
@@ -426,10 +432,34 @@ export function VideoPlayer({
         </a>
       )}
 
-      {error && !blocked && <p className="form-error">{error}</p>}
-      <p className="player__progress-hint">
+      {error && !blocked && (
+        <div className="player__error-box">
+          <p className="form-error">{error}</p>
+          {error.includes("อุปกรณ์") && (
+            <a
+              href="/devices"
+              target="_blank"
+              rel="noreferrer"
+              className="btn btn--ghost"
+              style={{ marginTop: "0.5rem", display: "inline-flex" }}
+            >
+              ไปหน้าจัดการอุปกรณ์ ↗
+            </a>
+          )}
+        </div>
+      )}
+      {error && !booting && (
+        <button className="btn btn--primary" type="button" onClick={() => { requestIdRef.current = crypto.randomUUID(); setAttempt((value) => value + 1); }}>
+          {blocked ? "สลับมาดูเครื่องนี้" : "ลองโหลดวิดีโออีกครั้ง"}
+        </button>
+      )}
+      <p className="player__progress-hint" data-testid="lesson-progress">
         {completed ? (
-          <span className="form-ok">ดูครบแล้ว — ปลดล็อกบทถัดไปได้</span>
+          <span className="form-ok">ผ่านบทเรียนแล้ว · ปลดล็อกบทถัดไปแล้ว</span>
+        ) : isYouTube ? (
+          <span className="muted">
+            ความคืบหน้า {watchPercent}% · ครบ 90% เพื่อปลดล็อกบทถัดไป
+          </span>
         ) : isDriveIframe ? (
           <span className="muted">
             โหมด Google Drive — กดปุ่มด้านล่างเมื่อดูจบเพื่อปลดล็อกบทถัดไป
@@ -469,7 +499,7 @@ export function VideoPlayer({
       {!compact && (
         <p className="player__hint">
           {isYouTube
-            ? "คลิปจาก YouTube (Unlisted) — ตั้งอนุญาตฝังบนโดเมนนี้ · ดูได้ทีละเครื่อง · ห้ามแชร์คีย์"
+            ? "เปิดเรียนได้ครั้งละหนึ่งหน้าต่าง · กรุณาเก็บคีย์ไว้เป็นส่วนตัว"
             : isDrive
               ? "คลิปจาก Google Drive — ตั้งแชร์เป็น “Anyone with the link” · ดูได้ทีละเครื่อง · ห้ามแชร์คีย์"
               : "ดูได้ทีละเครื่อง · ห้ามแชร์คีย์"}

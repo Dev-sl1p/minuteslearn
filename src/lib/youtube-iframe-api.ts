@@ -1,48 +1,31 @@
 let loadPromise: Promise<void> | null = null;
 
-/** Load the YouTube IFrame Player API once per page */
+/** One loader per page, with recovery after blocked scripts or lost connections. */
 export function loadYouTubeIframeApi(): Promise<void> {
-  if (typeof window === "undefined") {
-    return Promise.resolve();
-  }
-  if (window.YT?.Player) {
-    return Promise.resolve();
-  }
-  if (loadPromise) {
-    return loadPromise;
-  }
-
-  loadPromise = new Promise((resolve, reject) => {
-    const existing = document.querySelector<HTMLScriptElement>(
-      'script[src*="youtube.com/iframe_api"]',
-    );
-    if (existing) {
-      const waitForReady = () => {
-        if (window.YT?.Player) {
-          resolve();
-          return;
-        }
-        window.setTimeout(waitForReady, 50);
-      };
-      waitForReady();
-      return;
-    }
-
+  if (typeof window === "undefined" || window.YT?.Player) return Promise.resolve();
+  if (loadPromise) return loadPromise;
+  loadPromise = new Promise<void>((resolve, reject) => {
+    const existing = document.querySelector<HTMLScriptElement>('script[src="https://www.youtube.com/iframe_api"]');
+    const script = existing ?? document.createElement("script");
     const previousReady = window.onYouTubeIframeAPIReady;
-    window.onYouTubeIframeAPIReady = () => {
-      previousReady?.();
-      resolve();
+    const ready = () => { try { previousReady?.(); } finally { finish(); } };
+    const finish = (error?: Error) => {
+      clearInterval(poll);
+      clearTimeout(timeout);
+      script.removeEventListener("error", failed);
+      if (window.onYouTubeIframeAPIReady === ready) window.onYouTubeIframeAPIReady = previousReady;
+      if (error) { script.remove(); reject(error); } else resolve();
     };
-
-    const script = document.createElement("script");
-    script.src = "https://www.youtube.com/iframe_api";
-    script.async = true;
-    script.onerror = () => {
-      loadPromise = null;
-      reject(new Error("Failed to load YouTube IFrame API"));
-    };
-    document.head.appendChild(script);
-  });
-
+    const failed = () => finish(new Error("YouTube could not be loaded"));
+    const poll = setInterval(() => { if (window.YT?.Player) finish(); }, 100);
+    const timeout = setTimeout(() => finish(new Error("YouTube loading timed out")), 15000);
+    script.addEventListener("error", failed, { once: true });
+    window.onYouTubeIframeAPIReady = ready;
+    if (!existing) {
+      script.src = "https://www.youtube.com/iframe_api";
+      script.async = true;
+      document.head.appendChild(script);
+    }
+  }).catch((error) => { loadPromise = null; throw error; });
   return loadPromise;
 }

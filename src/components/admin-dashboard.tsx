@@ -1,12 +1,14 @@
 "use client";
 
 import Link from "next/link";
+import Image from "next/image";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { AdminAnalytics } from "@/components/admin-analytics";
 import { AdminOverview } from "@/components/admin-overview";
 import { Icon } from "@/components/icon";
 import { LoadingBlock, LoadingOverlay, Spinner } from "@/components/loading";
 import { useToast } from "@/components/toast";
+import { fetchWithTimeout as fetch } from "@/lib/client-fetch";
 
 type LessonResource = {
   id: string;
@@ -107,6 +109,7 @@ type AnalyticsPayload = {
     name: string | null;
     courses: number;
     completedLessons: number;
+    totalLessons: number;
   }[];
   recentEnrollments: {
     id: string;
@@ -251,12 +254,53 @@ export function AdminDashboard() {
   const [moduleTitle, setModuleTitle] = useState("");
   const [resourceTitle, setResourceTitle] = useState("");
   const [resourceUrl, setResourceUrl] = useState("");
+  const [licenseSearch, setLicenseSearch] = useState("");
+  const [licenseStatusFilter, setLicenseStatusFilter] = useState<
+    "ALL" | "ACTIVE" | "REVOKED"
+  >("ALL");
+  const [securitySearch, setSecuritySearch] = useState("");
+  const [securitySeverityFilter, setSecuritySeverityFilter] = useState("ALL");
   const dragLessonIdsRef = useRef<string[]>([]);
   const dragModuleIdRef = useRef<string | null>(null);
   const lastClickedLessonRef = useRef<string | null>(null);
   const reorderBusy = useRef(false);
   const persistQueue = useRef(Promise.resolve());
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+
+  const filteredLicenses = useMemo(() => {
+    const q = licenseSearch.trim().toLowerCase();
+    return licenses.filter((l) => {
+      if (licenseStatusFilter !== "ALL" && l.status !== licenseStatusFilter) {
+        return false;
+      }
+      if (!q) return true;
+      return (
+        l.key.toLowerCase().includes(q) ||
+        (l.user.email?.toLowerCase().includes(q) ?? false) ||
+        (l.user.name?.toLowerCase().includes(q) ?? false) ||
+        (l.course?.title.toLowerCase().includes(q) ?? false)
+      );
+    });
+  }, [licenses, licenseSearch, licenseStatusFilter]);
+
+  const filteredSecurityEvents = useMemo(() => {
+    const q = securitySearch.trim().toLowerCase();
+    return securityEvents.filter((e) => {
+      if (
+        securitySeverityFilter !== "ALL" &&
+        e.severity !== securitySeverityFilter
+      ) {
+        return false;
+      }
+      if (!q) return true;
+      return (
+        e.message.toLowerCase().includes(q) ||
+        e.type.toLowerCase().includes(q) ||
+        (e.actorEmail?.toLowerCase().includes(q) ?? false) ||
+        (e.ip?.toLowerCase().includes(q) ?? false)
+      );
+    });
+  }, [securityEvents, securitySearch, securitySeverityFilter]);
 
   const selectedCourse = useMemo(
     () => courses.find((c) => c.id === selectedCourseId) ?? null,
@@ -267,11 +311,6 @@ export function AdminDashboard() {
     () => new Set(selectedLessonIds),
     [selectedLessonIds],
   );
-
-  useEffect(() => {
-    setSelectedLessonIds([]);
-    lastClickedLessonRef.current = null;
-  }, [selectedCourseId]);
 
   const editingLesson = useMemo(
     () =>
@@ -321,7 +360,13 @@ export function AdminDashboard() {
               })),
             );
             if (!selectedCourseId && c.courses[0]) {
-              setSelectedCourseId(c.courses[0].id);
+              const first = c.courses[0] as Course;
+              setSelectedCourseId(first.id);
+              setLessonForm({
+                ...emptyLessonForm,
+                courseId: first.id,
+                order: first.lessons?.length ? first.lessons.length + 1 : 1,
+              });
             }
           })(),
         );
@@ -386,24 +431,22 @@ export function AdminDashboard() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  useEffect(() => {
-    if (!selectedCourseId && courses[0]) {
-      setSelectedCourseId(courses[0].id);
-    }
-  }, [courses, selectedCourseId]);
-
-  useEffect(() => {
-    setLessonForm((prev) => {
-      if (prev.id) return { ...prev, courseId: selectedCourseId || prev.courseId };
-      return {
-        ...prev,
-        courseId: selectedCourseId || prev.courseId,
-        order: nextLessonOrder,
-      };
-    });
-  }, [selectedCourseId, nextLessonOrder]);
+  function selectCourse(courseId: string) {
+    if (courseId === selectedCourseId) return true;
+    if ((lessonForm.id || lessonForm.title || lessonForm.streamAssetId || lessonForm.description)
+      && !confirm("สลับคอร์สและปิดฟอร์มบทเรียนนี้? การแก้ไขที่ยังไม่บันทึกจะถูกยกเลิก")) return false;
+    const course = courses.find((item) => item.id === courseId);
+    setSelectedCourseId(courseId);
+    setSelectedLessonIds([]);
+    lastClickedLessonRef.current = null;
+    setLessonForm({ ...emptyLessonForm, courseId, order: (course?.lessons.length ?? 0) + 1 });
+    setResourceTitle("");
+    setResourceUrl("");
+    return true;
+  }
 
   function editCourse(course: Course) {
+    if (!selectCourse(course.id)) return;
     setCourseForm({
       id: course.id,
       title: course.title,
@@ -414,7 +457,6 @@ export function AdminDashboard() {
       wooProductId: course.wooProductId ?? "",
       published: course.published,
     });
-    setSelectedCourseId(course.id);
     setTab("courses");
   }
 
@@ -456,6 +498,7 @@ export function AdminDashboard() {
     e.preventDefault();
     setPendingLabel("กำลังบันทึกคอร์ส...");
     setPending(true);
+    try {
     const res = await fetch("/api/admin/courses", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -471,32 +514,47 @@ export function AdminDashboard() {
       }),
     });
     const data = await res.json();
-    setPending(false);
     if (!res.ok) {
       toast.error("บันทึกคอร์สไม่สำเร็จ", data.error);
       return;
     }
     toast.ok(courseForm.id ? "อัปเดตคอร์สแล้ว" : "สร้างคอร์สแล้ว", data.course?.title);
-    setSelectedCourseId(data.course.id);
+    selectCourse(data.course.id);
     resetCourseForm();
     await refresh({ silent: true, scopes: ["courses"] });
+
+    } catch {
+      toast.error("เชื่อมต่อไม่สำเร็จ", "ตรวจสอบข้อมูลล่าสุดก่อนลองบันทึกอีกครั้ง");
+    } finally {
+      setPending(false);
+    }
   }
 
   async function deleteCourse(id: string) {
     if (!confirm("ลบคอร์สและบทเรียนทั้งหมด?")) return;
     setPendingLabel("กำลังลบคอร์ส...");
     setPending(true);
+    try {
     const res = await fetch(`/api/admin/courses?id=${id}`, { method: "DELETE" });
-    setPending(false);
     if (!res.ok) {
       const data = await res.json();
       toast.error("ลบคอร์สไม่สำเร็จ", data.error);
       return;
     }
     toast.ok("ลบคอร์สแล้ว");
-    if (selectedCourseId === id) setSelectedCourseId("");
+    if (selectedCourseId === id) {
+      setSelectedCourseId("");
+      setSelectedLessonIds([]);
+      lastClickedLessonRef.current = null;
+    }
     if (courseForm.id === id) resetCourseForm();
     await refresh({ silent: true, scopes: ["courses"] });
+
+    } catch {
+      toast.error("เชื่อมต่อไม่สำเร็จ", "ตรวจสอบข้อมูลล่าสุดก่อนลองบันทึกอีกครั้ง");
+    } finally {
+      setPending(false);
+    }
   }
 
   function renumberLessons(lessons: Lesson[]): Lesson[] {
@@ -904,6 +962,7 @@ export function AdminDashboard() {
     }
     setPendingLabel("กำลังบันทึกวิดีโอ...");
     setPending(true);
+    try {
     const mins = Number(lessonForm.durationMin || 0);
     const secs = Number(lessonForm.durationSec || 0);
     const durationSec =
@@ -934,7 +993,6 @@ export function AdminDashboard() {
       }),
     });
     const data = await res.json();
-    setPending(false);
     if (!res.ok) {
       toast.error("บันทึกวิดีโอไม่สำเร็จ", data.error);
       return;
@@ -942,6 +1000,12 @@ export function AdminDashboard() {
     toast.ok(lessonForm.id ? "อัปเดตวิดีโอแล้ว" : "เพิ่มวิดีโอแล้ว", title);
     resetLessonForm();
     await refresh({ silent: true, scopes: ["courses"] });
+
+    } catch {
+      toast.error("เชื่อมต่อไม่สำเร็จ", "ตรวจสอบข้อมูลล่าสุดก่อนลองบันทึกอีกครั้ง");
+    } finally {
+      setPending(false);
+    }
   }
 
   async function saveModule(e: React.FormEvent) {
@@ -957,13 +1021,13 @@ export function AdminDashboard() {
     }
     setPendingLabel("กำลังบันทึกโมดูล...");
     setPending(true);
+    try {
     const res = await fetch("/api/admin/modules", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ courseId: selectedCourseId, title }),
     });
     const data = await res.json();
-    setPending(false);
     if (!res.ok) {
       toast.error("บันทึกโมดูลไม่สำเร็จ", data.error);
       return;
@@ -971,16 +1035,22 @@ export function AdminDashboard() {
     toast.ok("เพิ่มโมดูลแล้ว", title);
     setModuleTitle("");
     await refresh({ silent: true, scopes: ["courses"] });
+
+    } catch {
+      toast.error("เชื่อมต่อไม่สำเร็จ", "ตรวจสอบข้อมูลล่าสุดก่อนลองบันทึกอีกครั้ง");
+    } finally {
+      setPending(false);
+    }
   }
 
   async function deleteModule(id: string) {
     if (!confirm("ลบโมดูลนี้? บทเรียนจะย้ายไปกลุ่มไม่มีโมดูล")) return;
     setPendingLabel("กำลังลบโมดูล...");
     setPending(true);
+    try {
     const res = await fetch(`/api/admin/modules?id=${id}`, {
       method: "DELETE",
     });
-    setPending(false);
     if (!res.ok) {
       const data = await res.json();
       toast.error("ลบโมดูลไม่สำเร็จ", data.error);
@@ -991,6 +1061,12 @@ export function AdminDashboard() {
       f.moduleId === id ? { ...f, moduleId: "" } : f,
     );
     await refresh({ silent: true, scopes: ["courses"] });
+
+    } catch {
+      toast.error("เชื่อมต่อไม่สำเร็จ", "ตรวจสอบข้อมูลล่าสุดก่อนลองบันทึกอีกครั้ง");
+    } finally {
+      setPending(false);
+    }
   }
 
   async function addResourceLink(e: React.FormEvent) {
@@ -1007,13 +1083,13 @@ export function AdminDashboard() {
     }
     setPendingLabel("กำลังเพิ่มลิงก์ไฟล์...");
     setPending(true);
+    try {
     const res = await fetch("/api/admin/resources", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ lessonId: lessonForm.id, title, url }),
     });
     const data = await res.json();
-    setPending(false);
     if (!res.ok) {
       toast.error("เพิ่มลิงก์ไม่สำเร็จ", data.error);
       return;
@@ -1022,6 +1098,12 @@ export function AdminDashboard() {
     setResourceTitle("");
     setResourceUrl("");
     await refresh({ silent: true, scopes: ["courses"] });
+
+    } catch {
+      toast.error("เชื่อมต่อไม่สำเร็จ", "ตรวจสอบข้อมูลล่าสุดก่อนลองบันทึกอีกครั้ง");
+    } finally {
+      setPending(false);
+    }
   }
 
   async function readApiJson(res: Response) {
@@ -1172,10 +1254,10 @@ export function AdminDashboard() {
     if (!confirm("ลบไฟล์แนบนี้?")) return;
     setPendingLabel("กำลังลบไฟล์...");
     setPending(true);
+    try {
     const res = await fetch(`/api/admin/resources?id=${id}`, {
       method: "DELETE",
     });
-    setPending(false);
     if (!res.ok) {
       const data = await res.json();
       toast.error("ลบไฟล์ไม่สำเร็จ", data.error);
@@ -1183,14 +1265,20 @@ export function AdminDashboard() {
     }
     toast.ok("ลบไฟล์แล้ว");
     await refresh({ silent: true, scopes: ["courses"] });
+
+    } catch {
+      toast.error("เชื่อมต่อไม่สำเร็จ", "ตรวจสอบข้อมูลล่าสุดก่อนลองบันทึกอีกครั้ง");
+    } finally {
+      setPending(false);
+    }
   }
 
   async function deleteLesson(id: string) {
     if (!confirm("ลบบทเรียนนี้?")) return;
     setPendingLabel("กำลังลบบทเรียน...");
     setPending(true);
+    try {
     const res = await fetch(`/api/admin/lessons?id=${id}`, { method: "DELETE" });
-    setPending(false);
     if (!res.ok) {
       const data = await res.json();
       toast.error("ลบบทไม่สำเร็จ", data.error);
@@ -1199,18 +1287,24 @@ export function AdminDashboard() {
     toast.ok("ลบบทเรียนแล้ว");
     if (lessonForm.id === id) resetLessonForm();
     await refresh({ silent: true, scopes: ["courses"] });
+
+    } catch {
+      toast.error("เชื่อมต่อไม่สำเร็จ", "ตรวจสอบข้อมูลล่าสุดก่อนลองบันทึกอีกครั้ง");
+    } finally {
+      setPending(false);
+    }
   }
 
   async function revoke(licenseId: string) {
     if (!confirm("ระงับคีย์และสิทธิ์เรียนของบัญชีนี้?")) return;
     setPendingLabel("กำลังระงับคีย์...");
     setPending(true);
+    try {
     const res = await fetch("/api/admin/licenses", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ licenseId, revokeDevices: true }),
     });
-    setPending(false);
     if (!res.ok) {
       const data = await res.json();
       toast.error("ระงับไม่สำเร็จ", data.error);
@@ -1218,6 +1312,12 @@ export function AdminDashboard() {
     }
     toast.ok("ระงับคีย์แล้ว");
     await refresh({ silent: true, scopes: ["licenses"] });
+
+    } catch {
+      toast.error("เชื่อมต่อไม่สำเร็จ", "ตรวจสอบข้อมูลล่าสุดก่อนลองบันทึกอีกครั้ง");
+    } finally {
+      setPending(false);
+    }
   }
 
   if (loading) {
@@ -1226,18 +1326,18 @@ export function AdminDashboard() {
 
   const adminNav: { id: Tab; label: string; icon: string }[] = [
     { id: "dashboard", label: "ภาพรวม", icon: "dashboard" },
-    { id: "videos", label: "แก้ไขหลักสูตร", icon: "video_library" },
+    { id: "courses", label: "คอร์สเรียน", icon: "library_books" },
+    { id: "videos", label: "โครงสร้างบทเรียน", icon: "video_library" },
+    { id: "licenses", label: "จัดการคีย์", icon: "vpn_key" },
     { id: "analytics", label: "วิเคราะห์ผู้เรียน", icon: "analytics" },
     { id: "security", label: "ความปลอดภัย", icon: "shield" },
-    { id: "licenses", label: "จัดการคีย์", icon: "vpn_key" },
-    { id: "courses", label: "คอร์ส", icon: "library_books" },
   ];
 
   return (
     <div className="admin-shell">
       <aside className="admin-shell__aside">
         <div className="app-shell__brand">
-          <img
+          <Image
             src="/logo-minutes-sharing.png"
             alt=""
             width={40}
@@ -1314,6 +1414,7 @@ export function AdminDashboard() {
           recentActivity={analytics?.recentActivity ?? []}
           onGoCourses={() => setTab("courses")}
           onGoAnalytics={() => setTab("analytics")}
+          onGoLicenses={() => setTab("licenses")}
         />
       )}
 
@@ -1333,6 +1434,22 @@ export function AdminDashboard() {
             <h2 className="admin-section-title">
               {courseForm.id ? "แก้ไขคอร์ส" : "เพิ่มคอร์สใหม่"}
             </h2>
+            {courseForm.id && (
+              <div className="admin-editing-banner">
+                <div>
+                  <span className="admin-editing-banner__label">กำลังแก้ไข:</span>
+                  <strong>{courseForm.title || "คอร์สนี้"}</strong>
+                </div>
+                <button
+                  type="button"
+                  className="btn btn--ghost"
+                  style={{ padding: "0.25rem 0.65rem", fontSize: "0.82rem" }}
+                  onClick={resetCourseForm}
+                >
+                  ✕ ยกเลิกแก้ไข (สร้างใหม่)
+                </button>
+              </div>
+            )}
             <form className="form admin-form" onSubmit={saveCourse}>
               <label>
                 ชื่อคอร์ส
@@ -1456,7 +1573,7 @@ export function AdminDashboard() {
                   <button
                     type="button"
                     className="admin-course-card__main"
-                    onClick={() => setSelectedCourseId(c.id)}
+                    onClick={() => selectCourse(c.id)}
                   >
                     <strong>{c.title}</strong>
                     <span className="muted">/{c.slug}</span>
@@ -1486,12 +1603,20 @@ export function AdminDashboard() {
                       type="button"
                       className="btn btn--ghost"
                       onClick={() => {
-                        setSelectedCourseId(c.id);
+                        selectCourse(c.id);
                         setTab("videos");
                       }}
                     >
-                      วิดีโอ
+                      จัดบทเรียน ({c.lessons.length})
                     </button>
+                    <Link
+                      href={`/learn/${c.slug}`}
+                      target="_blank"
+                      className="btn btn--ghost"
+                      title="เปิดดูหน้าคอร์สในมุมมองผู้เรียน"
+                    >
+                      ดูหน้าเรียน ↗
+                    </Link>
                     <button
                       type="button"
                       className="btn btn--danger"
@@ -1516,6 +1641,22 @@ export function AdminDashboard() {
             <h2 className="admin-section-title">
               {lessonForm.id ? "แก้ไขวิดีโอ" : "เพิ่มวิดีโอ / บทเรียน"}
             </h2>
+            {lessonForm.id && (
+              <div className="admin-editing-banner">
+                <div>
+                  <span className="admin-editing-banner__label">กำลังแก้ไข:</span>
+                  <strong>{lessonForm.title || "บทเรียนนี้"}</strong>
+                </div>
+                <button
+                  type="button"
+                  className="btn btn--ghost"
+                  style={{ padding: "0.25rem 0.65rem", fontSize: "0.82rem" }}
+                  onClick={resetLessonForm}
+                >
+                  ✕ ยกเลิกแก้ไข (เพิ่มบทใหม่)
+                </button>
+              </div>
+            )}
             <p className="muted" style={{ marginTop: 0 }}>
               วางลิงก์วิดีโอก่อน — ระบบจะลองใส่ชื่อบทและความยาวให้อัตโนมัติ
             </p>
@@ -1525,8 +1666,9 @@ export function AdminDashboard() {
                 <select
                   required
                   value={lessonForm.courseId}
+                  disabled={Boolean(lessonForm.id) || pending}
                   onChange={(e) => {
-                    setSelectedCourseId(e.target.value);
+                    selectCourse(e.target.value);
                     setLessonForm((f) => ({
                       ...f,
                       courseId: e.target.value,
@@ -1756,7 +1898,7 @@ export function AdminDashboard() {
               </h2>
               <select
                 value={selectedCourseId}
-                onChange={(e) => setSelectedCourseId(e.target.value)}
+                onChange={(e) => selectCourse(e.target.value)}
               >
                 {courses.map((c) => (
                   <option key={c.id} value={c.id}>
@@ -1794,6 +1936,7 @@ export function AdminDashboard() {
                       void (async () => {
                         setPendingLabel("กำลังบันทึกโมดูล...");
                         setPending(true);
+    try {
                         const res = await fetch("/api/admin/modules", {
                           method: "POST",
                           headers: { "Content-Type": "application/json" },
@@ -1803,7 +1946,6 @@ export function AdminDashboard() {
                           }),
                         });
                         const data = await res.json();
-                        setPending(false);
                         if (!res.ok) {
                           toast.error("บันทึกโมดูลไม่สำเร็จ", data.error);
                           return;
@@ -1811,7 +1953,13 @@ export function AdminDashboard() {
                         toast.ok("เพิ่มโมดูลแล้ว", title);
                         setModuleTitle("");
                         await refresh({ silent: true, scopes: ["courses"] });
-                      })();
+
+    } catch {
+      toast.error("เชื่อมต่อไม่สำเร็จ", "ตรวจสอบข้อมูลล่าสุดก่อนลองบันทึกอีกครั้ง");
+    } finally {
+      setPending(false);
+    }
+  })();
                     }}
                   >
                     + เพิ่มโมดูล
@@ -1934,6 +2082,7 @@ export function AdminDashboard() {
                                   void (async () => {
                                     setPendingLabel("กำลังแก้ชื่อโมดูล...");
                                     setPending(true);
+    try {
                                     const res = await fetch("/api/admin/modules", {
                                       method: "POST",
                                       headers: {
@@ -1946,7 +2095,6 @@ export function AdminDashboard() {
                                       }),
                                     });
                                     const data = await res.json();
-                                    setPending(false);
                                     if (!res.ok) {
                                       toast.error("แก้ชื่อโมดูลไม่สำเร็จ", data.error);
                                       e.target.value = m.title;
@@ -1954,7 +2102,13 @@ export function AdminDashboard() {
                                     }
                                     toast.ok("อัปเดตโมดูลแล้ว");
                                     await refresh({ silent: true, scopes: ["courses"] });
-                                  })();
+
+    } catch {
+      toast.error("เชื่อมต่อไม่สำเร็จ", "ตรวจสอบข้อมูลล่าสุดก่อนลองบันทึกอีกครั้ง");
+    } finally {
+      setPending(false);
+    }
+  })();
                                 }}
                                 onKeyDown={(e) => {
                                   if (e.key === "Enter") {
@@ -2294,7 +2448,18 @@ export function AdminDashboard() {
                 </div>
               </>
             ) : (
-              <p className="muted">สร้างคอร์สก่อน แล้วค่อยเพิ่มวิดีโอ</p>
+              <div style={{ textAlign: "center", padding: "2.5rem 1rem" }}>
+                <p className="muted" style={{ marginBottom: "1rem" }}>
+                  ยังไม่มีคอร์สเรียน กรุณาสร้างคอร์สก่อนจัดการโครงสร้างบทเรียน
+                </p>
+                <button
+                  type="button"
+                  className="btn btn--primary"
+                  onClick={() => setTab("courses")}
+                >
+                  + ไปหน้าคอร์สเพื่อสร้างคอร์สใหม่
+                </button>
+              </div>
             )}
           </section>
         </div>
@@ -2302,7 +2467,80 @@ export function AdminDashboard() {
 
       {tab === "licenses" && (
         <section className="panel" style={{ overflowX: "auto" }}>
-          <h2 className="admin-section-title">คีย์ทั้งหมด</h2>
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+              flexWrap: "wrap",
+              gap: "1rem",
+              marginBottom: "1rem",
+            }}
+          >
+            <div>
+              <h2 className="admin-section-title" style={{ margin: 0 }}>
+                คีย์ทั้งหมด ({licenses.length})
+              </h2>
+              <p
+                className="muted"
+                style={{ margin: "0.25rem 0 0 0", fontSize: "0.875rem" }}
+              >
+                ค้นหาและจัดการสิทธิ์การเข้าถึงคอร์สของผู้เรียน
+              </p>
+            </div>
+            <button
+              type="button"
+              className="btn btn--ghost"
+              onClick={() => void refresh({ silent: true, scopes: ["licenses"] })}
+              disabled={pending || loading}
+            >
+              {loading ? <Spinner size="sm" label="กำลังโหลด..." /> : "รีเฟรช"}
+            </button>
+          </div>
+
+          <div className="admin-filter-bar">
+            <div style={{ flex: "1 1 240px" }}>
+              <input
+                type="search"
+                className="admin-search-input"
+                placeholder="ค้นหาคีย์, อีเมล, ชื่อผู้เรียน, หรือชื่อคอร์ส..."
+                value={licenseSearch}
+                onChange={(e) => setLicenseSearch(e.target.value)}
+              />
+            </div>
+            <div style={{ display: "flex", gap: "0.375rem", flexWrap: "wrap" }}>
+              <button
+                type="button"
+                className={`admin-filter-btn ${
+                  licenseStatusFilter === "ALL" ? "is-active" : ""
+                }`}
+                onClick={() => setLicenseStatusFilter("ALL")}
+              >
+                ทั้งหมด ({licenses.length})
+              </button>
+              <button
+                type="button"
+                className={`admin-filter-btn ${
+                  licenseStatusFilter === "ACTIVE" ? "is-active" : ""
+                }`}
+                onClick={() => setLicenseStatusFilter("ACTIVE")}
+              >
+                ใช้งานอยู่ (
+                {licenses.filter((l) => l.status === "ACTIVE").length})
+              </button>
+              <button
+                type="button"
+                className={`admin-filter-btn ${
+                  licenseStatusFilter === "REVOKED" ? "is-active" : ""
+                }`}
+                onClick={() => setLicenseStatusFilter("REVOKED")}
+              >
+                ระงับแล้ว (
+                {licenses.filter((l) => l.status === "REVOKED").length})
+              </button>
+            </div>
+          </div>
+
           <table className="table">
             <thead>
               <tr>
@@ -2314,7 +2552,7 @@ export function AdminDashboard() {
               </tr>
             </thead>
             <tbody>
-              {licenses.map((l) => (
+              {filteredLicenses.map((l) => (
                 <tr key={l.id}>
                   <td>
                     <code>{l.key}</code>
@@ -2327,7 +2565,11 @@ export function AdminDashboard() {
                         l.status === "ACTIVE" ? "badge--ok" : "badge--bad"
                       }`}
                     >
-                      {l.status === "ACTIVE" ? "ใช้งาน" : l.status === "REVOKED" ? "ระงับแล้ว" : l.status}
+                      {l.status === "ACTIVE"
+                        ? "ใช้งาน"
+                        : l.status === "REVOKED"
+                          ? "ระงับแล้ว"
+                          : l.status}
                     </span>
                   </td>
                   <td>
@@ -2343,10 +2585,31 @@ export function AdminDashboard() {
                   </td>
                 </tr>
               ))}
-              {licenses.length === 0 && (
+              {filteredLicenses.length === 0 && (
                 <tr>
-                  <td colSpan={5} className="muted">
-                    ยังไม่มีคีย์ที่ถูกใช้
+                  <td
+                    colSpan={5}
+                    className="muted"
+                    style={{ textAlign: "center", padding: "2rem 1rem" }}
+                  >
+                    {licenses.length === 0
+                      ? "ยังไม่มีคีย์ที่ถูกใช้"
+                      : "ไม่พบคีย์ที่ตรงกับเงื่อนไขการค้นหา"}
+                    {(licenseSearch || licenseStatusFilter !== "ALL") && (
+                      <div style={{ marginTop: "0.5rem" }}>
+                        <button
+                          type="button"
+                          className="btn btn--ghost"
+                          style={{ fontSize: "0.8125rem" }}
+                          onClick={() => {
+                            setLicenseSearch("");
+                            setLicenseStatusFilter("ALL");
+                          }}
+                        >
+                          ล้างตัวกรอง
+                        </button>
+                      </div>
+                    )}
                   </td>
                 </tr>
               )}
@@ -2363,12 +2626,22 @@ export function AdminDashboard() {
               justifyContent: "space-between",
               gap: "1rem",
               alignItems: "center",
-              marginBottom: "0.75rem",
+              marginBottom: "0.5rem",
+              flexWrap: "wrap",
             }}
           >
-            <h2 className="admin-section-title" style={{ margin: 0 }}>
-              เหตุการณ์ความปลอดภัย
-            </h2>
+            <div>
+              <h2 className="admin-section-title" style={{ margin: 0 }}>
+                เหตุการณ์ความปลอดภัย ({securityEvents.length})
+              </h2>
+              <p
+                className="muted"
+                style={{ margin: "0.25rem 0 0 0", fontSize: "0.875rem" }}
+              >
+                บันทึกการเข้าสู่ระบบ / ใส่คีย์ / งานแอดมิน — ตั้ง
+                SECURITY_WEBHOOK_URL เพื่อแจ้งเตือนระดับเตือนและวิกฤต
+              </p>
+            </div>
             <button
               type="button"
               className="btn btn--ghost"
@@ -2378,10 +2651,60 @@ export function AdminDashboard() {
               {loading ? <Spinner size="sm" label="กำลังโหลด..." /> : "รีเฟรช"}
             </button>
           </div>
-          <p className="muted" style={{ marginTop: 0 }}>
-            บันทึกการเข้าสู่ระบบ / ใส่คีย์ / งานแอดมิน — ตั้ง SECURITY_WEBHOOK_URL
-            เพื่อแจ้งเตือนระดับเตือนและวิกฤต
-          </p>
+
+          <div className="admin-filter-bar">
+            <div style={{ flex: "1 1 240px" }}>
+              <input
+                type="search"
+                className="admin-search-input"
+                placeholder="ค้นหาข้อความ, ประเภท, อีเมล, หรือ IP..."
+                value={securitySearch}
+                onChange={(e) => setSecuritySearch(e.target.value)}
+              />
+            </div>
+            <div style={{ display: "flex", gap: "0.375rem", flexWrap: "wrap" }}>
+              <button
+                type="button"
+                className={`admin-filter-btn ${
+                  securitySeverityFilter === "ALL" ? "is-active" : ""
+                }`}
+                onClick={() => setSecuritySeverityFilter("ALL")}
+              >
+                ทั้งหมด ({securityEvents.length})
+              </button>
+              <button
+                type="button"
+                className={`admin-filter-btn ${
+                  securitySeverityFilter === "critical" ? "is-active" : ""
+                }`}
+                onClick={() => setSecuritySeverityFilter("critical")}
+              >
+                วิกฤต (
+                {securityEvents.filter((e) => e.severity === "critical").length})
+              </button>
+              <button
+                type="button"
+                className={`admin-filter-btn ${
+                  securitySeverityFilter === "warn" ? "is-active" : ""
+                }`}
+                onClick={() => setSecuritySeverityFilter("warn")}
+              >
+                เตือน ({securityEvents.filter((e) => e.severity === "warn").length}
+                )
+              </button>
+              <button
+                type="button"
+                className={`admin-filter-btn ${
+                  securitySeverityFilter === "info" ? "is-active" : ""
+                }`}
+                onClick={() => setSecuritySeverityFilter("info")}
+              >
+                ทั่วไป ({securityEvents.filter((e) => e.severity === "info").length}
+                )
+              </button>
+            </div>
+          </div>
+
           <table className="table">
             <thead>
               <tr>
@@ -2394,7 +2717,7 @@ export function AdminDashboard() {
               </tr>
             </thead>
             <tbody>
-              {securityEvents.map((e) => (
+              {filteredSecurityEvents.map((e) => (
                 <tr key={e.id}>
                   <td>
                     {new Date(e.createdAt).toLocaleString("th-TH", {
@@ -2423,10 +2746,31 @@ export function AdminDashboard() {
                   <td>{e.ip ?? "—"}</td>
                 </tr>
               ))}
-              {securityEvents.length === 0 && (
+              {filteredSecurityEvents.length === 0 && (
                 <tr>
-                  <td colSpan={6} className="muted">
-                    ยังไม่มีเหตุการณ์
+                  <td
+                    colSpan={6}
+                    className="muted"
+                    style={{ textAlign: "center", padding: "2rem 1rem" }}
+                  >
+                    {securityEvents.length === 0
+                      ? "ยังไม่มีเหตุการณ์"
+                      : "ไม่พบเหตุการณ์ที่ตรงกับเงื่อนไขการค้นหา"}
+                    {(securitySearch || securitySeverityFilter !== "ALL") && (
+                      <div style={{ marginTop: "0.5rem" }}>
+                        <button
+                          type="button"
+                          className="btn btn--ghost"
+                          style={{ fontSize: "0.8125rem" }}
+                          onClick={() => {
+                            setSecuritySearch("");
+                            setSecuritySeverityFilter("ALL");
+                          }}
+                        >
+                          ล้างตัวกรอง
+                        </button>
+                      </div>
+                    )}
                   </td>
                 </tr>
               )}

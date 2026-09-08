@@ -1,154 +1,110 @@
-import NextAuth from "next-auth";
+import NextAuth, { CredentialsSignin } from "next-auth";
 import Credentials from "next-auth/providers/credentials";
 import { PrismaAdapter } from "@auth/prisma-adapter";
 import bcrypt from "bcryptjs";
 import { z } from "zod";
 import { logSecurityEvent } from "@/lib/audit";
 import { authConfig } from "@/lib/auth.config";
+import { createLoginSession, credentialStamp, validateLoginSession } from "@/lib/auth-session";
 import { prisma } from "@/lib/db";
 import { loginWithEmailAndLicense } from "@/lib/license-login";
-import { rateLimit } from "@/lib/rate-limit";
+import { getClientIp, rateLimit } from "@/lib/rate-limit";
 
-const licenseSchema = z.object({
-  email: z.string().email(),
-  licenseKey: z.string().min(4),
+const identitySchema = z.object({
+  email: z.string().trim().toLowerCase().email().max(200),
+  fingerprint: z.string().min(8).max(128).regex(/^[a-zA-Z0-9_-]+$/),
 });
+const licenseSchema = identitySchema.extend({ licenseKey: z.string().trim().min(4).max(128) });
+const adminSchema = identitySchema.extend({ password: z.string().min(6).max(256) });
 
-const adminSchema = z.object({
-  email: z.string().email(),
-  password: z.string().min(6),
-});
+class LoginError extends CredentialsSignin {
+  constructor(code: string) { super(); this.code = code; }
+}
+
+async function checkLoginLimit(kind: "license" | "admin", email: string, req: Request) {
+  const ip = getClientIp(req);
+  const limits = await Promise.all([
+    rateLimit({ key: `auth:${kind}:ip:${ip}`, limit: kind === "admin" ? 15 : 30, windowMs: 15 * 60 * 1000 }),
+    rateLimit({ key: `auth:${kind}:email:${email}`, limit: kind === "admin" ? 10 : 20, windowMs: 60 * 60 * 1000 }),
+  ]);
+  if (limits.some((limit) => !limit.ok)) {
+    await logSecurityEvent({ type: "RATE_LIMITED", severity: "warn", message: "Login rate limited", actorEmail: email, ip });
+    throw new LoginError("RATE_LIMITED");
+  }
+  return ip;
+}
 
 export const { handlers, auth, signIn, signOut } = NextAuth({
   ...authConfig,
   adapter: PrismaAdapter(prisma),
-  // Stale cookies after AUTH_SECRET rotate decode as JWTSessionError;
-  // Auth.js already clears them — don't surface as a red console error.
+  callbacks: {
+    ...authConfig.callbacks,
+    async jwt({ token, user }) {
+      if (user?.id && user.fingerprint && user.credentialStamp) {
+        token.id = user.id;
+        token.role = user.role;
+        token.fingerprint = user.fingerprint;
+        token.credentialStamp = user.credentialStamp;
+        token.loginSession = await createLoginSession(user.id, user.fingerprint);
+      }
+      // Legacy cookies and revoked sessions must authenticate again.
+      return (await validateLoginSession(token)) ? token : null;
+    },
+  },
+  events: {
+    async signOut(message) {
+      if ("token" in message && message.token?.loginSession) {
+        await prisma.session.deleteMany({ where: { sessionToken: message.token.loginSession } });
+      }
+    },
+  },
   logger: {
     error(error) {
-      if (
-        error?.name === "JWTSessionError" ||
-        (typeof error === "object" &&
-          error &&
-          "type" in error &&
-          error.type === "JWTSessionError")
-      ) {
-        return;
-      }
+      if (error?.name === "JWTSessionError" || error instanceof CredentialsSignin) return;
       console.error(error);
     },
   },
   providers: [
     Credentials({
-      id: "license",
-      name: "License key",
-      credentials: {
-        email: { label: "Email", type: "email" },
-        licenseKey: { label: "License key", type: "text" },
-      },
-      async authorize(raw) {
+      id: "license", name: "License key",
+      credentials: { email: {}, licenseKey: {}, fingerprint: {} },
+      async authorize(raw, req) {
         const parsed = licenseSchema.safeParse(raw);
-        if (!parsed.success) return null;
-
-        const email = parsed.data.email.toLowerCase();
-        const limited = await rateLimit({
-          key: `auth-license:${email}`,
-          limit: 20,
-          windowMs: 15 * 60 * 1000,
-        });
-        if (!limited.ok) {
-          await logSecurityEvent({
-            type: "RATE_LIMITED",
-            severity: "warn",
-            message: `License auth rate limited: ${email}`,
-            actorEmail: email,
-          });
-          return null;
+        if (!parsed.success) throw new LoginError("EMPTY");
+        const { email, fingerprint, licenseKey } = parsed.data;
+        const ip = await checkLoginLimit("license", email, req);
+        try {
+          const result = await loginWithEmailAndLicense({ email, licenseKey });
+          if (result.ok && result.user.role !== "USER") throw new LoginError("INVALID_KEY");
+          if (!result.ok) {
+            await logSecurityEvent({ type: "LOGIN_FAIL", severity: "warn", message: `License login failed: ${result.error}`, actorEmail: email, ip });
+            throw new LoginError(result.error);
+          }
+          await logSecurityEvent({ type: "LOGIN_OK", message: "License login success", actorId: result.user.id, actorEmail: email, ip });
+          return { id: result.user.id, email, name: result.user.name, role: result.user.role, fingerprint, credentialStamp: credentialStamp(result.user) };
+        } catch (error) {
+          if (error instanceof LoginError) throw error;
+          await logSecurityEvent({ type: "LOGIN_FAIL", severity: "warn", message: "License service unavailable", actorEmail: email, ip });
+          throw new LoginError("SERVICE_UNAVAILABLE");
         }
-
-        const result = await loginWithEmailAndLicense({
-          email: parsed.data.email,
-          licenseKey: parsed.data.licenseKey,
-        });
-        // LOGIN_OK / LOGIN_FAIL are logged in /api/license-login (has IP)
-        if (!result.ok) return null;
-
-        return {
-          id: result.user.id,
-          email: result.user.email,
-          name: result.user.name,
-          role: result.user.role,
-        };
       },
     }),
     Credentials({
-      id: "admin",
-      name: "Admin password",
-      credentials: {
-        email: { label: "Email", type: "email" },
-        password: { label: "Password", type: "password" },
-      },
-      async authorize(raw) {
+      id: "admin", name: "Admin password",
+      credentials: { email: {}, password: {}, fingerprint: {} },
+      async authorize(raw, req) {
         const parsed = adminSchema.safeParse(raw);
         if (!parsed.success) return null;
-
-        const email = parsed.data.email.toLowerCase();
-        const limited = await rateLimit({
-          key: `auth-admin:${email}`,
-          limit: 10,
-          windowMs: 15 * 60 * 1000,
-        });
-        if (!limited.ok) {
-          await logSecurityEvent({
-            type: "RATE_LIMITED",
-            severity: "warn",
-            message: `Admin auth rate limited: ${email}`,
-            actorEmail: email,
-          });
+        const { email, password, fingerprint } = parsed.data;
+        const ip = await checkLoginLimit("admin", email, req);
+        const user = await prisma.user.findUnique({ where: { email } });
+        const valid = user?.role === "ADMIN" && user.passwordHash && await bcrypt.compare(password, user.passwordHash);
+        if (!valid || !user) {
+          await logSecurityEvent({ type: "ADMIN_LOGIN_FAIL", severity: "warn", message: "Admin credentials rejected", actorEmail: email, ip });
           return null;
         }
-
-        const user = await prisma.user.findUnique({
-          where: { email },
-        });
-        if (!user?.passwordHash || user.role !== "ADMIN") {
-          await logSecurityEvent({
-            type: "ADMIN_LOGIN_FAIL",
-            severity: "critical",
-            message: "Admin login failed — unknown user or not admin",
-            actorEmail: email,
-          });
-          return null;
-        }
-
-        const valid = await bcrypt.compare(
-          parsed.data.password,
-          user.passwordHash,
-        );
-        if (!valid) {
-          await logSecurityEvent({
-            type: "ADMIN_LOGIN_FAIL",
-            severity: "critical",
-            message: "Admin login failed — bad password",
-            actorId: user.id,
-            actorEmail: email,
-          });
-          return null;
-        }
-
-        await logSecurityEvent({
-          type: "ADMIN_LOGIN_OK",
-          message: "Admin login success",
-          actorId: user.id,
-          actorEmail: user.email,
-        });
-
-        return {
-          id: user.id,
-          email: user.email,
-          name: user.name,
-          role: user.role,
-        };
+        await logSecurityEvent({ type: "ADMIN_LOGIN_OK", message: "Admin login success", actorId: user.id, actorEmail: email, ip });
+        return { id: user.id, email, name: user.name, role: user.role, fingerprint, credentialStamp: credentialStamp(user) };
       },
     }),
   ],

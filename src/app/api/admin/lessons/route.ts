@@ -24,7 +24,7 @@ const schema = z.object({
   slug: slugSchema,
   description: z.string().max(5000).optional().nullable(),
   streamAssetId: videoRefSchema,
-  durationSec: z.number().int().optional().nullable(),
+  durationSec: z.number().int().min(1).max(86400).optional().nullable(),
 });
 
 const reorderSchema = z.object({
@@ -76,6 +76,11 @@ export async function POST(req: Request) {
   });
   if (!course) {
     return NextResponse.json({ error: "ไม่พบคอร์ส" }, { status: 404 });
+  }
+  if (parsed.data.id) {
+    const existing = await prisma.lesson.findUnique({ where: { id: parsed.data.id }, select: { courseId: true } });
+    if (!existing) return NextResponse.json({ error: "ไม่พบบทเรียน" }, { status: 404 });
+    if (existing.courseId !== course.id) return NextResponse.json({ error: "คอร์สของบทเรียนไม่ตรงกับฟอร์ม กรุณาเปิดบทเรียนใหม่ก่อนแก้ไข" }, { status: 409 });
   }
 
   const stream = parsed.data.streamAssetId?.trim() || null;

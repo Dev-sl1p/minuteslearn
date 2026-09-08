@@ -2,6 +2,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { Suspense } from "react";
 import { HomeCta } from "@/components/home-cta";
+import { Icon } from "@/components/icon";
 
 function CtaFallback() {
   return (
@@ -46,6 +47,38 @@ export default function HomePage() {
         <Suspense fallback={<CtaFallback />}>
           <HomeCta />
         </Suspense>
+      </div>
+
+      <div className="hero__features">
+        <div className="hero-feature-card">
+          <div className="hero-feature-card__icon" aria-hidden>
+            <Icon name="key" size={24} />
+          </div>
+          <div className="hero-feature-card__content">
+            <h3>เข้าเรียนได้ทันที</h3>
+            <p>ใช้อีเมลและคีย์ที่ได้รับจากร้านค้า ไม่ต้องจำรหัสผ่านให้ยุ่งยาก</p>
+          </div>
+        </div>
+
+        <div className="hero-feature-card">
+          <div className="hero-feature-card__icon" aria-hidden>
+            <Icon name="devices" size={24} />
+          </div>
+          <div className="hero-feature-card__content">
+            <h3>บันทึกความคืบหน้า</h3>
+            <p>ระบบบันทึกจุดที่เรียนค้างไว้ สามารถสลับอุปกรณ์และเรียนต่อได้ราบรื่น</p>
+          </div>
+        </div>
+
+        <div className="hero-feature-card">
+          <div className="hero-feature-card__icon" aria-hidden>
+            <Icon name="speed" size={24} />
+          </div>
+          <div className="hero-feature-card__content">
+            <h3>ปรับสปีดได้ตามใจ</h3>
+            <p>รองรับการปรับความเร็ววิดีโอ 1.25x - 2.0x พร้อมภาพคมชัดระดับ HD</p>
+          </div>
+        </div>
       </div>
     </section>
   );

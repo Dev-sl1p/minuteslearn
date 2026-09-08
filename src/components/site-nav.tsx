@@ -53,7 +53,7 @@ export function SiteNav({ isAdmin, signedIn, signOutAction }: Props) {
       className="btn btn--primary"
       onClick={() => setOpen(false)}
     >
-      อีเมล + คีย์
+      เข้าเรียน
     </Link>
   );
 

@@ -6,49 +6,42 @@ import { useRouter } from "next/navigation";
 import { Spinner } from "@/components/loading";
 import { useToast } from "@/components/toast";
 import { licenseLoginErrorMessage } from "@/lib/license-login-messages";
+import { getDeviceFingerprint } from "@/lib/fingerprint";
+import { safeReturnPath } from "@/lib/redirect-target";
 
-export function LoginForm() {
+export function LoginForm({ returnTo = "/library" }: { returnTo?: string }) {
   const router = useRouter();
   const toast = useToast();
   const [pending, setPending] = useState(false);
 
   async function onSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
+    if (pending) return;
     setPending(true);
-    const fd = new FormData(e.currentTarget);
-    const email = String(fd.get("email") ?? "");
-    const licenseKey = String(fd.get("licenseKey") ?? "");
+    try {
+      const fd = new FormData(e.currentTarget);
+      const email = String(fd.get("email") ?? "");
+      const licenseKey = String(fd.get("licenseKey") ?? "");
 
-    const check = await fetch("/api/license-login", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ email, licenseKey }),
-    });
-    const data = await check.json();
-    if (!check.ok) {
+      const res = await signIn("license", {
+        email,
+        licenseKey,
+        fingerprint: getDeviceFingerprint(),
+        redirect: false,
+      });
       setPending(false);
-      toast.error(
-        "เข้าสู่ระบบไม่สำเร็จ",
-        data.error
-          ? licenseLoginErrorMessage(data.error, data.message)
-          : undefined,
-      );
-      return;
+      if (!res || res.error) {
+        toast.error("เข้าสู่ระบบไม่สำเร็จ", licenseLoginErrorMessage(res?.code ?? "INVALID_KEY"));
+        return;
+      }
+      toast.ok("เข้าเรียนสำเร็จ", email);
+      router.push(safeReturnPath(returnTo));
+      router.refresh();
+    } catch {
+      toast.error("เชื่อมต่อไม่สำเร็จ", "ตรวจสอบอินเทอร์เน็ตแล้วลองอีกครั้ง ข้อมูลที่กรอกยังอยู่");
+    } finally {
+      setPending(false);
     }
-
-    const res = await signIn("license", {
-      email,
-      licenseKey,
-      redirect: false,
-    });
-    setPending(false);
-    if (res?.error) {
-      toast.error("เข้าสู่ระบบไม่สำเร็จ");
-      return;
-    }
-    toast.ok("เข้าเรียนสำเร็จ", email);
-    router.push("/library");
-    router.refresh();
   }
 
   return (

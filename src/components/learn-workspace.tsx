@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Icon } from "@/components/icon";
 import { useToast } from "@/components/toast";
 import { VideoPlayer } from "@/components/video-player";
@@ -99,6 +99,7 @@ export function LearnWorkspace({
   isAdmin = false,
 }: Props) {
   const toast = useToast();
+  const sidebarRef = useRef<HTMLElement>(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [isDesktop, setIsDesktop] = useState(false);
@@ -106,13 +107,11 @@ export function LearnWorkspace({
     () => new Set(completedLessonIds),
   );
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
+  const [downloadLinks, setDownloadLinks] = useState<Record<string, string>>({});
   const [openModuleKeys, setOpenModuleKeys] = useState<Set<string> | null>(
     null,
   );
-
-  useEffect(() => {
-    setCompleted(new Set(completedLessonIds));
-  }, [completedLessonIds]);
+  const [activeTab, setActiveTab] = useState<"details" | "resources">("details");
 
   useEffect(() => {
     const mq = window.matchMedia("(min-width: 960px)");
@@ -127,12 +126,27 @@ export function LearnWorkspace({
 
   useEffect(() => {
     if (isDesktop || !sidebarOpen) {
-      document.body.style.overflow = "";
       return;
     }
+    const previousOverflow = document.body.style.overflow;
+    const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     document.body.style.overflow = "hidden";
+    const focusable = () => Array.from(sidebarRef.current?.querySelectorAll<HTMLElement>('a[href],button:not(:disabled),input:not(:disabled),[tabindex="0"]') ?? []);
+    focusable()[0]?.focus();
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") { event.preventDefault(); setSidebarOpen(false); }
+      if (event.key !== "Tab") return;
+      const items = focusable();
+      const target = event.shiftKey ? items[items.length - 1] : items[0];
+      if ((event.shiftKey && document.activeElement === items[0]) || (!event.shiftKey && document.activeElement === items[items.length - 1])) {
+        event.preventDefault(); target?.focus();
+      }
+    };
+    document.addEventListener("keydown", onKey);
     return () => {
-      document.body.style.overflow = "";
+      document.body.style.overflow = previousOverflow;
+      document.removeEventListener("keydown", onKey);
+      previousFocus?.focus();
     };
   }, [isDesktop, sidebarOpen]);
 
@@ -207,17 +221,6 @@ export function LearnWorkspace({
     return group?.key ?? null;
   }, [sidebarGroups, lesson.id]);
 
-  useEffect(() => {
-    if (!activeModuleKey) return;
-    setOpenModuleKeys((prev) => {
-      if (prev == null) return new Set([activeModuleKey]);
-      if (prev.has(activeModuleKey)) return prev;
-      const next = new Set(prev);
-      next.add(activeModuleKey);
-      return next;
-    });
-  }, [activeModuleKey]);
-
   function toggleModule(key: string) {
     setOpenModuleKeys((prev) => {
       const base = prev ?? new Set(activeModuleKey ? [activeModuleKey] : []);
@@ -231,8 +234,8 @@ export function LearnWorkspace({
   function isModuleOpen(key: string, hasTitle: boolean) {
     if (!hasTitle) return true;
     if (query.trim()) return true;
-    if (openModuleKeys == null) return key === activeModuleKey;
-    return openModuleKeys.has(key);
+    if (key === activeModuleKey) return true;
+    return openModuleKeys?.has(key) ?? false;
   }
 
   const doneCount = lessons.filter((l) => completed.has(l.id)).length;
@@ -246,16 +249,26 @@ export function LearnWorkspace({
   }
 
   async function downloadResource(id: string) {
+    // Open while the click still has user activation. Keep an ordinary link as
+    // a fallback for browsers that block popups entirely.
+    const popup = window.open("about:blank", "_blank");
+    if (popup) popup.opener = null;
     setDownloadingId(id);
     try {
-      const res = await fetch(`/api/learn/resources/${id}/download`);
+      const res = await fetch(`/api/learn/resources/${id}/download`, { signal: AbortSignal.timeout(15000) });
       const data = await res.json();
       if (!res.ok) {
+        popup?.close();
         toast.error("ดาวน์โหลดไม่สำเร็จ", data.error);
         return;
       }
-      window.open(data.url as string, "_blank", "noopener,noreferrer");
+      const url = new URL(String(data.url));
+      if (url.protocol !== "https:") throw new Error("Invalid download URL");
+      setDownloadLinks((links) => ({ ...links, [id]: url.href }));
+      if (popup) popup.location.replace(url.href);
+      else toast.info("ไฟล์พร้อมแล้ว", "กดเปิดไฟล์ด้านล่างเพื่อดาวน์โหลด");
     } catch {
+      popup?.close();
       toast.error("ดาวน์โหลดไม่สำเร็จ");
     } finally {
       setDownloadingId(null);
@@ -318,6 +331,7 @@ export function LearnWorkspace({
           </nav>
 
           <VideoPlayer
+            key={lesson.id}
             lessonId={lesson.id}
             compact
             alreadyCompleted={currentDone}
@@ -331,12 +345,6 @@ export function LearnWorkspace({
             }}
           />
           <div className="learn-meta anim-rise">
-            <div className="learn-meta__tabs">
-              <span className="learn-meta__tab is-active">รายละเอียดเนื้อหา</span>
-              {resources.length > 0 ? (
-                <span className="learn-meta__tab">เอกสารประกอบ</span>
-              ) : null}
-            </div>
             <div className="learn-meta__row">
               <span className="badge badge--current">บทที่ {currentLabel}</span>
               {currentDone ? (
@@ -349,29 +357,81 @@ export function LearnWorkspace({
               )}
             </div>
             <h2 className="learn-meta__title">{lesson.title}</h2>
-            {lesson.description && (
-              <p className="learn-meta__desc">{lesson.description}</p>
-            )}
+
             {resources.length > 0 && (
+              <div className="learn-meta__tabs" role="tablist" aria-label="แท็บเนื้อหาบทเรียน">
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={activeTab === "details"}
+                  className={`learn-meta__tab${activeTab === "details" ? " is-active" : ""}`}
+                  onClick={() => setActiveTab("details")}
+                >
+                  รายละเอียดเนื้อหา
+                </button>
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={activeTab === "resources"}
+                  className={`learn-meta__tab${activeTab === "resources" ? " is-active" : ""}`}
+                  onClick={() => setActiveTab("resources")}
+                >
+                  เอกสารประกอบ ({resources.length})
+                </button>
+              </div>
+            )}
+
+            {activeTab === "details" && (
+              <div className="learn-meta__body">
+                {lesson.description ? (
+                  <p className="learn-meta__desc">{lesson.description}</p>
+                ) : (
+                  <p className="muted" style={{ margin: 0 }}>ไม่มีคำอธิบายเพิ่มเติมสำหรับบทเรียนนี้</p>
+                )}
+              </div>
+            )}
+
+            {activeTab === "resources" && resources.length > 0 && (
               <div className="learn-resources">
-                <p className="learn-resources__label">ไฟล์ประกอบ</p>
+                <p className="learn-resources__label">ไฟล์เอกสารประกอบ ({resources.length} รายการ)</p>
                 <ul className="learn-resources__list">
                   {resources.map((r) => (
-                    <li key={r.id}>
-                      <button
-                        type="button"
-                        className="btn btn--ghost"
-                        disabled={downloadingId === r.id}
-                        onClick={() => void downloadResource(r.id)}
-                      >
-                        {downloadingId === r.id ? (
-                          "กำลังเตรียมลิงก์..."
-                        ) : (
-                          <>
-                            <Icon name="download" size={18} /> {r.title}
-                          </>
+                    <li key={r.id} className="learn-resource-card">
+                      <div className="learn-resource-card__info">
+                        <span className="learn-resource-card__icon" aria-hidden>
+                          <Icon name="description" size={20} />
+                        </span>
+                        <div>
+                          <span className="learn-resource-card__title">{r.title}</span>
+                          <span className="learn-resource-card__sub">เอกสารประกอบบทเรียน</span>
+                        </div>
+                      </div>
+                      <div className="learn-resource-card__actions">
+                        <button
+                          type="button"
+                          className="btn btn--ghost btn--sm"
+                          disabled={downloadingId === r.id}
+                          onClick={() => void downloadResource(r.id)}
+                        >
+                          {downloadingId === r.id ? (
+                            "กำลังเตรียมลิงก์..."
+                          ) : (
+                            <>
+                              <Icon name="download" size={16} /> ดาวน์โหลด
+                            </>
+                          )}
+                        </button>
+                        {downloadLinks[r.id] && (
+                          <a
+                            className="btn btn--primary btn--sm"
+                            href={downloadLinks[r.id]}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                          >
+                            เปิดไฟล์ ↗
+                          </a>
                         )}
-                      </button>
+                      </div>
                     </li>
                   ))}
                 </ul>
@@ -425,8 +485,9 @@ export function LearnWorkspace({
                 onClick={() => setSidebarOpen(false)}
               />
             )}
-            <aside className="learn-sidebar" aria-label="ลำดับการเรียน">
+            <aside ref={sidebarRef} className="learn-sidebar" aria-label="ลำดับการเรียน" role={isDesktop ? undefined : "dialog"} aria-modal={isDesktop ? undefined : true}>
               <div className="learn-sidebar__head">
+                {!isDesktop && <button type="button" className="btn btn--ghost" onClick={() => setSidebarOpen(false)}>ปิดรายการบทเรียน</button>}
                 <div>
                   <h2>เนื้อหาหลักสูตร</h2>
                   <p className="muted">

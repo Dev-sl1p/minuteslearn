@@ -5,6 +5,7 @@ import { loadYouTubeIframeApi } from "@/lib/youtube-iframe-api";
 
 type Props = {
   videoId: string;
+  startSeconds?: number;
   paused?: boolean;
   onReady?: () => void;
   onProgress?: (current: number, duration: number, ended: boolean) => void;
@@ -13,6 +14,7 @@ type Props = {
 
 function YouTubeHostInner({
   videoId,
+  startSeconds = 0,
   paused = false,
   onReady,
   onProgress,
@@ -23,9 +25,14 @@ function YouTubeHostInner({
   const onReadyRef = useRef(onReady);
   const onProgressRef = useRef(onProgress);
   const onErrorRef = useRef(onError);
-  onReadyRef.current = onReady;
-  onProgressRef.current = onProgress;
-  onErrorRef.current = onError;
+  const pausedRef = useRef(paused);
+
+  useEffect(() => {
+    onReadyRef.current = onReady;
+    onProgressRef.current = onProgress;
+    onErrorRef.current = onError;
+    pausedRef.current = paused;
+  }, [onError, onProgress, onReady, paused]);
 
   useEffect(() => {
     const host = hostRef.current;
@@ -39,13 +46,19 @@ function YouTubeHostInner({
     let cancelled = false;
     let progressTimer: ReturnType<typeof setInterval> | undefined;
 
-    function report(ended = false) {
+    function readPosition() {
       const player = playerRef.current;
-      if (!player?.getCurrentTime || !player.getDuration) return;
+      if (!player?.getCurrentTime || !player.getDuration) return null;
       const current = player.getCurrentTime();
       const duration = player.getDuration();
-      if (!duration || !Number.isFinite(duration) || duration <= 0) return;
-      onProgressRef.current?.(current, duration, ended);
+      if (!Number.isFinite(current) || current < 0 || !Number.isFinite(duration) || duration <= 0) return null;
+      return { current: Math.min(current, duration), duration };
+    }
+
+    function report(ended = false) {
+      const position = readPosition();
+      if (!position) return;
+      onProgressRef.current?.(position.current, position.duration, ended);
     }
 
     function stopPolling() {
@@ -73,16 +86,19 @@ function YouTubeHostInner({
             playsinline: 1,
             origin: window.location.origin,
             enablejsapi: 1,
+            start: Math.floor(startSeconds),
           },
           events: {
             onReady: () => {
               if (cancelled) return;
               playerRef.current = player;
+              if (pausedRef.current) player.pauseVideo();
               onReadyRef.current?.();
             },
             onStateChange: (event) => {
               if (cancelled) return;
               if (event.data === YT.PlayerState.PLAYING) {
+                if (pausedRef.current) { player.pauseVideo(); return; }
                 startPolling();
                 return;
               }
@@ -101,6 +117,7 @@ function YouTubeHostInner({
             },
             onError: () => {
               if (cancelled) return;
+              stopPolling();
               onErrorRef.current?.();
             },
           },
@@ -118,7 +135,7 @@ function YouTubeHostInner({
       playerRef.current = null;
       mount.remove();
     };
-  }, [videoId]);
+  }, [videoId, startSeconds]);
 
   useEffect(() => {
     if (paused) playerRef.current?.pauseVideo();
@@ -127,6 +144,4 @@ function YouTubeHostInner({
   return <div ref={hostRef} className="player__video player__youtube" />;
 }
 
-export const YouTubeHost = memo(YouTubeHostInner, (prev, next) => {
-  return prev.videoId === next.videoId && prev.paused === next.paused;
-});
+export const YouTubeHost = memo(YouTubeHostInner);

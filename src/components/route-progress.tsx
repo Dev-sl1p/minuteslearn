@@ -10,10 +10,11 @@ export function RouteProgress() {
   const [phase, setPhase] = useState<"idle" | "run" | "done">("idle");
 
   useEffect(() => {
-    setPhase("run");
+    const frame = window.requestAnimationFrame(() => setPhase("run"));
     const almost = window.setTimeout(() => setPhase("done"), 280);
     const hide = window.setTimeout(() => setPhase("idle"), 520);
     return () => {
+      window.cancelAnimationFrame(frame);
       window.clearTimeout(almost);
       window.clearTimeout(hide);
     };

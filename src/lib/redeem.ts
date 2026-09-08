@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/db";
 import { activateLicense, validateLicense } from "@/lib/wp-license";
+import { refreshLicenseStatus } from "@/lib/license-status";
 
 export async function redeemLicenseKey(input: {
   userId: string;
@@ -113,7 +114,9 @@ async function findCourseForLicense(
     if (byId) return byId;
   }
 
-  // Single-product shops often issue LMFWC keys with a null productId.
+  // Never assign a different product's key to the only available course.
+  if (productId || productSku) return null;
+  // Legacy keys without any product identity may use a single explicit mapping.
   const mapped = await prisma.course.findMany({
     where: {
       published: true,
@@ -155,5 +158,14 @@ export async function userHasCourseAccess(
   });
   if (!entitlement || entitlement.status !== "ACTIVE") return false;
   if (entitlement.expiresAt && entitlement.expiresAt < new Date()) return false;
+  if (entitlement.licenseId) {
+    const license = await prisma.license.findUnique({ where: { id: entitlement.licenseId } });
+    if (!license) return false;
+    try {
+      return await refreshLicenseStatus(license);
+    } catch {
+      return false;
+    }
+  }
   return true;
 }

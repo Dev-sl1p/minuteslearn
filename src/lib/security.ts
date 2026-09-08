@@ -32,6 +32,15 @@ function allowedVideoHosts() {
     .filter(Boolean);
 }
 
+function allowedCoverImageHosts() {
+  const raw = process.env.COVER_IMAGE_ALLOWED_HOSTS?.trim();
+  if (!raw) return [];
+  return raw
+    .split(",")
+    .map((host) => host.trim().toLowerCase())
+    .filter(Boolean);
+}
+
 function hostMatches(host: string, rule: string) {
   if (rule.includes("*")) {
     const re = new RegExp(
@@ -72,9 +81,21 @@ function isPrivateOrLocalHost(hostname: string) {
   return false;
 }
 
-/** https image hosts safe to fetch server-side for course covers */
-export function isCoverFetchUrl(value: URL) {
-  return value.protocol === "https:" && !isPrivateOrLocalHost(value.hostname);
+/** https image URLs that the cover proxy may fetch server-side. */
+export function isAllowedCoverImageUrl(value: URL) {
+  if (value.protocol !== "https:" || isPrivateOrLocalHost(value.hostname)) {
+    return false;
+  }
+
+  const configuredSupabaseHost = process.env.NEXT_PUBLIC_SUPABASE_URL
+    ? new URL(process.env.NEXT_PUBLIC_SUPABASE_URL).hostname.toLowerCase()
+    : null;
+  const host = value.hostname.toLowerCase();
+  return (
+    host === configuredSupabaseHost ||
+    isPicInThHost(host) ||
+    allowedCoverImageHosts().includes(host)
+  );
 }
 
 function hostAllowed(hostname: string) {
@@ -124,6 +145,22 @@ export const httpsUrlSchema = z
       return false;
     }
   }, "URL ไม่ถูกต้องหรือโดเมนไม่อยู่ใน whitelist");
+
+/** Course covers use their own strict allowlist, independent of resource URLs. */
+export const coverUrlSchema = z
+  .string()
+  .trim()
+  .refine((v) => !v || /^https:\/\//i.test(v), {
+    message: "ต้องเป็น https:// เท่านั้น",
+  })
+  .refine((v) => {
+    if (!v) return true;
+    try {
+      return isAllowedCoverImageUrl(new URL(v));
+    } catch {
+      return false;
+    }
+  }, "URL รูปปกไม่อยู่ใน allowlist");
 
 export const videoRefSchema = z
   .string()

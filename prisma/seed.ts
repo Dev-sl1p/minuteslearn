@@ -14,7 +14,12 @@ const SAMPLE_VIDEOS = {
 } as const;
 
 async function main() {
-  const passwordHash = await bcrypt.hash("password123", 10);
+  if (process.env.NODE_ENV === "production" || process.env.VERCEL_ENV === "production") {
+    throw new Error("Demo seeding is disabled in production");
+  }
+  const password = process.env.SEED_ADMIN_PASSWORD;
+  if (!password || password.length < 12) throw new Error("Set SEED_ADMIN_PASSWORD (at least 12 characters) before seeding");
+  const passwordHash = await bcrypt.hash(password, 12);
 
   const admin = await prisma.user.upsert({
     where: { email: "admin@minutessharing.com" },
@@ -151,7 +156,7 @@ async function main() {
     videos: SAMPLE_VIDEOS,
   });
   console.log("Demo license keys: DEMO-COURSE-001, DEMO-COURSE-002");
-  console.log("Login password for both users: password123");
+  console.log("Demo accounts created. Passwords are not printed.");
 }
 
 main()

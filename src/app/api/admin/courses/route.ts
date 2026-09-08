@@ -4,7 +4,7 @@ import { logSecurityEvent } from "@/lib/audit";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import {
-  httpsUrlSchema,
+  coverUrlSchema,
   sanitizeNullableText,
   sanitizeText,
   slugSchema,
@@ -24,7 +24,7 @@ const upsertSchema = z.object({
   slug: slugSchema,
   description: z.string().max(5000).optional().nullable(),
   coverUrl: z
-    .union([httpsUrlSchema, z.literal(""), z.null()])
+    .union([coverUrlSchema, z.literal(""), z.null()])
     .optional(),
   wooProductId: z.string().max(64).optional().nullable(),
   wooSku: z.string().max(120).optional().nullable(),

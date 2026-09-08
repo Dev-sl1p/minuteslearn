@@ -32,10 +32,6 @@ export function AppShell({
   const greeting = userName?.trim() || userEmail?.split("@")[0] || "ผู้เรียน";
 
   useEffect(() => {
-    setMenuOpen(false);
-  }, [pathname]);
-
-  useEffect(() => {
     if (!menuOpen) return;
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") setMenuOpen(false);

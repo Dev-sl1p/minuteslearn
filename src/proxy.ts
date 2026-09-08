@@ -4,12 +4,20 @@ import { authConfig } from "@/lib/auth.config";
 
 const { auth } = NextAuth(authConfig);
 
-export default auth((req) => {
+export const proxy = auth((req) => {
   const { pathname } = req.nextUrl;
   const session = req.auth;
 
   // Always allow the admin login page (page itself redirects if already ADMIN)
   if (pathname.startsWith("/admin/login")) {
+    return NextResponse.next();
+  }
+
+  // Guard /api/admin endpoints
+  if (pathname.startsWith("/api/admin")) {
+    if (!session?.user?.id || session.user.role !== "ADMIN") {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
     return NextResponse.next();
   }
 
@@ -48,5 +56,6 @@ export const config = {
     "/learn/:path*",
     "/admin",
     "/admin/:path*",
+    "/api/admin/:path*",
   ],
 };

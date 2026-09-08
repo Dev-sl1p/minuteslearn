@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/db";
 import { redeemLicenseKey } from "@/lib/redeem";
 import { validateLicense } from "@/lib/wp-license";
+import { refreshLicenseStatus } from "@/lib/license-status";
 
 /**
  * Binding rules:
@@ -28,11 +29,20 @@ export async function loginWithEmailAndLicense(input: {
   });
 
   if (existing) {
+    if (existing.user.role !== "USER") {
+      return { ok: false as const, error: "INVALID_KEY" as const };
+    }
     if (existing.status !== "ACTIVE") {
       return { ok: false as const, error: "REVOKED" as const };
     }
     if (existing.user.email.toLowerCase() !== email) {
       return { ok: false as const, error: "BOUND_OTHER_EMAIL" as const };
+    }
+    if (existing.expiresAt && existing.expiresAt <= new Date()) {
+      return { ok: false as const, error: "INVALID_KEY" as const };
+    }
+    if (!(await refreshLicenseStatus(existing, true))) {
+      return { ok: false as const, error: "INVALID_KEY" as const };
     }
     return {
       ok: true as const,
@@ -57,38 +67,51 @@ export async function loginWithEmailAndLicense(input: {
     return { ok: false as const, error: "EMAIL_MISMATCH_ORDER" as const };
   }
 
-  const user = await prisma.user.upsert({
-    where: { email },
-    create: {
+  // New keys must not authenticate an existing identity. Add extra keys only
+  // through /redeem after authenticating with that account's existing key.
+  const account = await prisma.user.findUnique({ where: { email } });
+  if (account) {
+    return { ok: false as const, error: "USE_EXISTING_KEY" as const };
+  }
+  const user = await prisma.user.create({
+    data: {
       email,
       name: email.split("@")[0] || "Learner",
       role: "USER",
     },
-    update: {},
   });
 
-  const redeemed = await redeemLicenseKey({
-    userId: user.id,
-    licenseKey: validated.key,
-    instanceId,
-  });
+  let bound = false;
+  try {
+    const redeemed = await redeemLicenseKey({
+      userId: user.id,
+      licenseKey: validated.key,
+      instanceId,
+    });
 
-  if (!redeemed.ok) {
+    if (!redeemed.ok) {
+      return {
+        ok: false as const,
+        error: redeemed.error,
+        message: "message" in redeemed ? redeemed.message : undefined,
+        ...("productId" in redeemed
+          ? { productId: redeemed.productId, productSku: redeemed.productSku }
+          : {}),
+      };
+    }
+    bound = true;
+
+    const fresh = await prisma.user.findUniqueOrThrow({ where: { id: user.id } });
     return {
-      ok: false as const,
-      error: redeemed.error,
-      message: "message" in redeemed ? redeemed.message : undefined,
-      ...("productId" in redeemed
-        ? { productId: redeemed.productId, productSku: redeemed.productSku }
-        : {}),
+      ok: true as const,
+      user: fresh,
+      firstBind: true as const,
+      course: redeemed.course,
     };
+  } finally {
+    // A rejected first bind must not leave an empty account that blocks retry.
+    if (!bound) await prisma.user.deleteMany({
+      where: { id: user.id, role: "USER", licenses: { none: {} }, entitlements: { none: {} } },
+    });
   }
-
-  const fresh = await prisma.user.findUniqueOrThrow({ where: { id: user.id } });
-  return {
-    ok: true as const,
-    user: fresh,
-    firstBind: true as const,
-    course: redeemed.course,
-  };
 }

@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
-import { isCoverFetchUrl } from "@/lib/security";
+import { auth } from "@/lib/auth";
+import { rasterImageType, storageCoverVisibility } from "@/lib/cover-access";
+import { isAllowedCoverImageUrl } from "@/lib/security";
 import {
   getSupabaseAdmin,
   storageBucket,
@@ -27,6 +29,11 @@ async function streamStorageObject(bucket: string, path: string) {
     return NextResponse.json({ error: "Storage not configured" }, { status: 503 });
   }
 
+  const visibility = await storageCoverVisibility(bucket, path);
+  if (!visibility || (visibility === "draft" && (await auth())?.user?.role !== "ADMIN")) {
+    return NextResponse.json({ error: "Cover not found" }, { status: 404 });
+  }
+
   const { data, error } = await getSupabaseAdmin()
     .storage.from(bucket)
     .download(path);
@@ -38,19 +45,23 @@ async function streamStorageObject(bucket: string, path: string) {
     );
   }
 
+  if (data.size > MAX_BYTES) {
+    return NextResponse.json({ error: "Image too large" }, { status: 413 });
+  }
   const buffer = Buffer.from(await data.arrayBuffer());
   if (buffer.byteLength > MAX_BYTES) {
     return NextResponse.json({ error: "Image too large" }, { status: 413 });
   }
 
-  const contentType =
-    data.type && data.type.startsWith("image/") ? data.type : "image/jpeg";
+  const contentType = rasterImageType(buffer);
+  if (!contentType) return NextResponse.json({ error: "Not a supported image" }, { status: 415 });
 
   return new NextResponse(buffer, {
     status: 200,
     headers: {
       "Content-Type": contentType,
-      "Cache-Control": "public, s-maxage=86400, stale-while-revalidate=604800",
+      "Cache-Control": "private, no-store",
+      "X-Content-Type-Options": "nosniff",
     },
   });
 }
@@ -59,7 +70,8 @@ async function streamExternalImage(target: URL) {
   let upstream: Response;
   try {
     upstream = await fetch(target, {
-      redirect: "follow",
+      // Never make a second request before validating its destination.
+      redirect: "error",
       signal: AbortSignal.timeout(FETCH_MS),
       headers: {
         Accept: "image/avif,image/webp,image/apng,image/*,*/*;q=0.8",
@@ -79,16 +91,6 @@ async function streamExternalImage(target: URL) {
     );
   }
 
-  let finalUrl: URL;
-  try {
-    finalUrl = new URL(upstream.url);
-  } catch {
-    return NextResponse.json({ error: "Redirect not allowed" }, { status: 403 });
-  }
-  if (!isCoverFetchUrl(finalUrl)) {
-    return NextResponse.json({ error: "Redirect not allowed" }, { status: 403 });
-  }
-
   const contentType = upstream.headers.get("content-type") ?? "";
   if (!contentType.toLowerCase().startsWith("image/")) {
     return NextResponse.json({ error: "Not an image" }, { status: 415 });
@@ -99,15 +101,29 @@ async function streamExternalImage(target: URL) {
     return NextResponse.json({ error: "Image too large" }, { status: 413 });
   }
 
-  const buffer = Buffer.from(await upstream.arrayBuffer());
-  if (buffer.byteLength > MAX_BYTES) {
-    return NextResponse.json({ error: "Image too large" }, { status: 413 });
+  const reader = upstream.body?.getReader();
+  if (!reader) return NextResponse.json({ error: "Empty image" }, { status: 502 });
+  const chunks: Uint8Array[] = [];
+  let bytes = 0;
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    bytes += value.byteLength;
+    if (bytes > MAX_BYTES) {
+      await reader.cancel();
+      return NextResponse.json({ error: "Image too large" }, { status: 413 });
+    }
+    chunks.push(value);
   }
+  const buffer = Buffer.concat(chunks);
+  const detectedType = rasterImageType(buffer);
+  if (!detectedType) return NextResponse.json({ error: "Not a supported image" }, { status: 415 });
 
   return new NextResponse(buffer, {
     status: 200,
     headers: {
-      "Content-Type": contentType,
+      "Content-Type": detectedType,
+      "X-Content-Type-Options": "nosniff",
       "Cache-Control": "public, s-maxage=86400, stale-while-revalidate=604800",
     },
   });
@@ -126,6 +142,10 @@ export async function GET(req: Request) {
 
   const fromSupabase = parseSupabaseStorageObject(raw);
   if (fromSupabase) {
+    const configured = process.env.NEXT_PUBLIC_SUPABASE_URL;
+    if (!configured || new URL(raw).hostname !== new URL(configured).hostname) {
+      return NextResponse.json({ error: "Host not allowed" }, { status: 403 });
+    }
     return streamStorageObject(fromSupabase.bucket, fromSupabase.path);
   }
 
@@ -136,7 +156,7 @@ export async function GET(req: Request) {
     return badRequest("Invalid url");
   }
 
-  if (!isCoverFetchUrl(target)) {
+  if (!isAllowedCoverImageUrl(target)) {
     return NextResponse.json({ error: "Host not allowed" }, { status: 403 });
   }
 

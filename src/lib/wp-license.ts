@@ -248,6 +248,7 @@ export async function validateLicense(
   const res = await fetch(url, {
     headers: { Authorization: auth, Accept: "application/json" },
     cache: "no-store",
+    signal: AbortSignal.timeout(8000),
   });
 
   if (res.status === 404) return null;
@@ -281,6 +282,7 @@ export async function activateLicense(
   const url = `${base}/wp-json/lmfwc/v2/licenses/activate/${encodeURIComponent(key)}`;
   const res = await fetch(url, {
     method: "GET",
+    signal: AbortSignal.timeout(8000),
     headers: {
       Authorization: auth,
       Accept: "application/json",

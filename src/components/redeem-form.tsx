@@ -13,29 +13,37 @@ export function RedeemForm() {
 
   async function onSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
+    if (pending) return;
     setPending(true);
-    const fd = new FormData(e.currentTarget);
-    const licenseKey = String(fd.get("licenseKey") ?? "");
+    try {
+      const fd = new FormData(e.currentTarget);
+      const licenseKey = String(fd.get("licenseKey") ?? "");
 
-    const res = await fetch("/api/redeem", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        licenseKey,
-        deviceFingerprint: getDeviceFingerprint(),
-      }),
-    });
-    const data = await res.json();
-    setPending(false);
+      const res = await fetch("/api/redeem", {
+        method: "POST",
+        signal: AbortSignal.timeout(25000),
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          licenseKey,
+          deviceFingerprint: getDeviceFingerprint(),
+        }),
+      });
+      const data = await res.json();
+      setPending(false);
 
-    if (!res.ok) {
-      toast.error("ใส่คีย์ไม่สำเร็จ", data.error);
-      return;
+      if (!res.ok) {
+        toast.error("ใส่คีย์ไม่สำเร็จ", data.error);
+        return;
+      }
+
+      toast.ok("เปิดคอร์สแล้ว", data.course?.title);
+      router.push(`/learn/${data.course.slug}`);
+      router.refresh();
+    } catch {
+      toast.error("เชื่อมต่อไม่สำเร็จ", "ตรวจสอบอินเทอร์เน็ตแล้วลองเพิ่มคีย์อีกครั้ง");
+    } finally {
+      setPending(false);
     }
-
-    toast.ok("เปิดคอร์สแล้ว", data.course?.title);
-    router.push(`/learn/${data.course.slug}`);
-    router.refresh();
   }
 
   return (

@@ -1,6 +1,7 @@
 "use client";
 
 import { Icon } from "@/components/icon";
+import { useState } from "react";
 
 type CourseStat = {
   id: string;
@@ -20,6 +21,7 @@ type Student = {
   name: string | null;
   courses: number;
   completedLessons: number;
+  totalLessons: number;
 };
 
 type DayPoint = { key: string; label: string; count: number };
@@ -49,6 +51,10 @@ export function AdminAnalytics({
   redeemByDay = [],
   onGoCourses,
 }: Props) {
+  const [query, setQuery] = useState("");
+  const visibleStudents = topStudents.filter((student) =>
+    `${student.name ?? ""} ${student.email}`.toLowerCase().includes(query.trim().toLowerCase()),
+  );
   if (!overview) {
     return <p className="muted">กำลังโหลดข้อมูล...</p>;
   }
@@ -89,11 +95,9 @@ export function AdminAnalytics({
         <div className="admin-analytics__controls">
           <label className="admin-analytics__search">
             <span className="sr-only">ค้นหานักเรียน</span>
-            <input type="search" placeholder="ค้นหานักเรียน..." disabled />
+            <input type="search" placeholder="ค้นหาในรายชื่อด้านล่าง..." value={query} onChange={(event) => setQuery(event.target.value)} />
           </label>
-          <button type="button" className="btn btn--ghost admin-analytics__range" disabled>
-            30 วันล่าสุด
-          </button>
+          <span className="muted">ยอดกิจกรรมสรุป 30 วันล่าสุด</span>
         </div>
       </div>
 
@@ -154,7 +158,7 @@ export function AdminAnalytics({
         <section className="panel admin-analytics__chart">
           <div className="admin-panel-head">
             <h3 className="admin-section-title" style={{ margin: 0 }}>
-              แนวโน้มการเรียน
+              การเปิดคีย์ใน 7 วันที่ผ่านมา
             </h3>
             <span className="muted" aria-hidden>
               ···
@@ -164,7 +168,7 @@ export function AdminAnalytics({
             <div
               className="admin-bar-chart admin-bar-chart--tall"
               role="img"
-              aria-label="กราฟกิจกรรมเรียนรายวัน"
+              aria-label="กราฟจำนวนคีย์ที่เปิดใช้งานรายวัน"
             >
               {chartDays.map((d) => (
                 <div key={d.key} className="admin-bar-chart__col">
@@ -224,11 +228,8 @@ export function AdminAnalytics({
       <section className="panel admin-directory">
         <div className="admin-directory__head">
           <h3 className="admin-section-title" style={{ margin: 0 }}>
-            รายชื่อผู้เรียน
+            ผู้เรียนที่จบบทเรียนสูงสุด 15 คน
           </h3>
-          <button type="button" className="btn btn--ghost" disabled>
-            กรอง
-          </button>
         </div>
         <div className="admin-directory__scroll">
           <table className="admin-directory__table">
@@ -242,10 +243,10 @@ export function AdminAnalytics({
               </tr>
             </thead>
             <tbody>
-              {topStudents.map((s) => {
+              {visibleStudents.map((s) => {
                 const progress = Math.min(
                   100,
-                  Math.round((s.completedLessons / Math.max(1, s.courses * 5)) * 100),
+                  Math.round((s.completedLessons / Math.max(1, s.totalLessons)) * 100),
                 );
                 return (
                   <tr key={s.userId}>
@@ -284,10 +285,10 @@ export function AdminAnalytics({
                   </tr>
                 );
               })}
-              {topStudents.length === 0 && (
+              {visibleStudents.length === 0 && (
                 <tr>
                   <td colSpan={5} className="muted">
-                    ยังไม่มีข้อมูลความคืบหน้า
+                    {query ? "ไม่พบผู้เรียนที่ตรงกับคำค้น" : "ยังไม่มีข้อมูลความคืบหน้า"}
                   </td>
                 </tr>
               )}
@@ -295,9 +296,7 @@ export function AdminAnalytics({
           </table>
         </div>
         <div className="admin-directory__foot">
-          <button type="button" className="btn btn--ghost" disabled>
-            โหลดเพิ่ม
-          </button>
+          <span className="muted">แสดง {visibleStudents.length} จาก {topStudents.length} คนในรายชื่อ · ความคืบหน้าสะสมทุกช่วงเวลา</span>
         </div>
       </section>
     </div>

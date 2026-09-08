@@ -6,10 +6,11 @@ import { userHasCourseAccess } from "@/lib/redeem";
 import { registerDevice } from "@/lib/devices";
 import { cleanupStaleSessions, startPlaybackSession } from "@/lib/playback-session";
 import { createPlaybackToken, PlaybackConfigError } from "@/lib/stream";
+import { userHasLessonAccess } from "@/lib/progress";
 
 const schema = z.object({
   lessonId: z.string().min(1),
-  fingerprint: z.string().min(8).max(128),
+  requestId: z.string().uuid(),
   label: z.string().max(80).optional(),
 });
 
@@ -29,7 +30,7 @@ export async function POST(req: Request) {
     where: { id: parsed.data.lessonId },
     include: { course: true },
   });
-  if (!lesson || !lesson.course.published) {
+  if (!lesson || (!lesson.course.published && session.user.role !== "ADMIN")) {
     return NextResponse.json({ error: "Lesson not found" }, { status: 404 });
   }
 
@@ -41,9 +42,12 @@ export async function POST(req: Request) {
   }
 
   const isAdmin = session.user.role === "ADMIN";
+  if (!(await userHasLessonAccess(session.user.id, lesson.id, lesson.courseId, isAdmin))) {
+    return NextResponse.json({ error: "เรียนบทก่อนหน้าให้จบก่อน" }, { status: 403 });
+  }
   const deviceResult = await registerDevice({
     userId: session.user.id,
-    fingerprint: parsed.data.fingerprint,
+    fingerprint: session.user.fingerprint,
     label: parsed.data.label,
     skipLimit: isAdmin,
   });
@@ -61,12 +65,6 @@ export async function POST(req: Request) {
 
   await cleanupStaleSessions();
 
-  const playbackSession = await startPlaybackSession({
-    userId: session.user.id,
-    deviceId: deviceResult.device.id,
-    lessonId: lesson.id,
-  });
-
   if (!lesson.streamAssetId?.trim()) {
     return NextResponse.json(
       { error: "บทเรียนนี้ยังไม่มีวิดีโอ — ติดต่อแอดมิน" },
@@ -80,10 +78,20 @@ export async function POST(req: Request) {
       lessonId: lesson.id,
       assetId: lesson.streamAssetId,
     });
+    const playbackSession = await startPlaybackSession({
+      userId: session.user.id, deviceId: deviceResult.device.id, lessonId: lesson.id,
+      requestId: parsed.data.requestId,
+    });
+    if (!playbackSession) return NextResponse.json({ error: "เซสชันนี้สิ้นสุดแล้ว กรุณากดเล่นต่ออีกครั้ง" }, { status: 409 });
+    const progress = await prisma.lessonProgress.findUnique({
+      where: { userId_lessonId: { userId: session.user.id, lessonId: lesson.id } },
+    });
 
     return NextResponse.json({
       sessionToken: playbackSession.token,
       playback,
+      resumeAt: progress?.completed ? 0 : progress?.watchedSec ?? 0,
+      percent: progress?.percent ?? 0,
     });
   } catch (e) {
     if (e instanceof PlaybackConfigError) {

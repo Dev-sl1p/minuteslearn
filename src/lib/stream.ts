@@ -96,9 +96,14 @@ export async function createPlaybackToken(input: {
   lessonId: string;
   assetId: string;
 }): Promise<StreamPlayback> {
-  const provider = (process.env.VIDEO_PROVIDER ?? "mock").toLowerCase();
-  const { token, expiresAt } = await signInternalToken(input);
+  const provider = (process.env.VIDEO_PROVIDER ?? "youtube").toLowerCase();
   const asset = input.assetId.trim();
+  // YouTube authorizes at the application endpoint. An internal JWT neither
+  // protects a YouTube URL nor needs STREAM_TOKEN_SECRET/Mux credentials.
+  const youtubeId = extractYouTubeVideoId(asset);
+  if (youtubeId) return { provider: "youtube", playbackUrl: youtubeId, expiresAt: 0 };
+  if (provider === "youtube") throw new PlaybackConfigError("กรุณาใส่ลิงก์หรือรหัสวิดีโอ YouTube ที่ถูกต้อง");
+  const { token, expiresAt } = await signInternalToken(input);
 
   if (!asset || asset === "demo") {
     throw new PlaybackConfigError("บทเรียนนี้ยังไม่มีวิดีโอ");
@@ -110,16 +115,6 @@ export async function createPlaybackToken(input: {
     return {
       provider: "drive",
       playbackUrl: googleDrivePreviewUrl(driveId),
-      token,
-      expiresAt,
-    };
-  }
-
-  const youtubeId = extractYouTubeVideoId(asset);
-  if (youtubeId) {
-    return {
-      provider: "youtube",
-      playbackUrl: youtubeId,
       token,
       expiresAt,
     };

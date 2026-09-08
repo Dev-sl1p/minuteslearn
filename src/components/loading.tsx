@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useSyncExternalStore } from "react";
 import { createPortal } from "react-dom";
 
 type SpinnerProps = {
@@ -52,14 +52,19 @@ function LoadingCard({ label }: { label: string }) {
   );
 }
 
+const subscribeToNothing = () => () => {};
+
+function useMounted() {
+  return useSyncExternalStore(subscribeToNothing, () => true, () => false);
+}
+
 /** Full-viewport route loading — portaled to body so it covers legacy chrome */
 export function PageLoading({
   label = "กำลังโหลด...",
 }: {
   label?: string;
 }) {
-  const [mounted, setMounted] = useState(false);
-  useEffect(() => setMounted(true), []);
+  const mounted = useMounted();
 
   const node = (
     <div
@@ -85,8 +90,7 @@ export function LoadingOverlay({
   show: boolean;
   label?: string;
 }) {
-  const [mounted, setMounted] = useState(false);
-  useEffect(() => setMounted(true), []);
+  const mounted = useMounted();
 
   if (!show) return null;
 

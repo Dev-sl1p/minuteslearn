@@ -40,6 +40,7 @@ type Props = {
   recentActivity: Activity[];
   onGoCourses: () => void;
   onGoAnalytics: () => void;
+  onGoLicenses?: () => void;
 };
 
 function fmtTime(iso: string) {
@@ -56,6 +57,7 @@ export function AdminOverview({
   recentActivity,
   onGoCourses,
   onGoAnalytics,
+  onGoLicenses,
 }: Props) {
   if (!overview) {
     return <p className="muted">กำลังโหลดภาพรวม...</p>;
@@ -108,33 +110,57 @@ export function AdminOverview({
       </div>
 
       <div className="admin-stat-grid admin-stat-grid--4">
-        {cards.map((c, i) => (
-          <article key={c.label} className="admin-stat-card">
-            <div
-              className={`admin-stat-card__icon ${
-                ["admin-stat-card__icon--rose", "admin-stat-card__icon--red", "admin-stat-card__icon--gray", "admin-stat-card__icon--blue"][i]
-              }`}
-              aria-hidden
+        {cards.map((c, i) => {
+          const clickHandler =
+            i === 0
+              ? onGoAnalytics
+              : i === 1
+                ? onGoCourses
+                : i === 2
+                  ? onGoLicenses
+                  : onGoAnalytics;
+
+          return (
+            <article
+              key={c.label}
+              className={`admin-stat-card ${clickHandler ? "admin-stat-card--clickable" : ""}`}
+              onClick={clickHandler}
+              role={clickHandler ? "button" : undefined}
+              tabIndex={clickHandler ? 0 : undefined}
+              onKeyDown={(e) => {
+                if (clickHandler && (e.key === "Enter" || e.key === " ")) {
+                  e.preventDefault();
+                  clickHandler();
+                }
+              }}
+              title={clickHandler ? `คลิกเพื่อเปิดดู${c.label}` : undefined}
             >
-              <Icon
-                name={["group", "library_books", "vpn_key", "schedule"][i]!}
-                size={22}
-              />
-            </div>
-            <p className="admin-stat-card__label">{c.label}</p>
-            <div className="admin-stat-card__value-row">
-              <p className="admin-stat-card__value">
-                {c.value.toLocaleString("th-TH")}
-              </p>
-              <span className="admin-stat-card__badge">{c.hint}</span>
-            </div>
-          </article>
-        ))}
+              <div
+                className={`admin-stat-card__icon ${
+                  ["admin-stat-card__icon--rose", "admin-stat-card__icon--red", "admin-stat-card__icon--gray", "admin-stat-card__icon--blue"][i]
+                }`}
+                aria-hidden
+              >
+                <Icon
+                  name={["group", "library_books", "vpn_key", "schedule"][i]!}
+                  size={22}
+                />
+              </div>
+              <p className="admin-stat-card__label">{c.label}</p>
+              <div className="admin-stat-card__value-row">
+                <p className="admin-stat-card__value">
+                  {c.value.toLocaleString("th-TH")}
+                </p>
+                <span className="admin-stat-card__badge">{c.hint}</span>
+              </div>
+            </article>
+          );
+        })}
       </div>
 
       <div className="admin-overview__split">
         <section className="panel">
-          <h3 className="admin-section-title">กิจกรรมรายเดือน</h3>
+          <h3 className="admin-section-title">การเปิดคีย์ใน 7 วันที่ผ่านมา</h3>
           <div className="admin-bar-chart" role="img" aria-label="กราฟเปิดคีย์รายวัน">
             {redeemByDay.map((d) => (
               <div key={d.key} className="admin-bar-chart__col">

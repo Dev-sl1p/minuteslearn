@@ -85,12 +85,12 @@ export async function GET() {
     }),
     prisma.lessonProgress.groupBy({
       by: ["courseId"],
-      where: { completed: true },
+      where: { completed: true, user: { role: "USER" } },
       _count: { _all: true },
     }),
     prisma.lessonProgress.groupBy({
       by: ["userId"],
-      where: { completed: true },
+      where: { completed: true, user: { role: "USER" } },
       _count: { _all: true },
     }),
     prisma.license.findMany({
@@ -110,7 +110,6 @@ export async function GET() {
     const lessons = lessonCountMap.get(c.id) ?? c._count.lessons;
     const completed = completedMap.get(c.id) ?? 0;
     const learners = c._count.entitlements;
-    const possible = Math.max(lessons * Math.max(learners, 1), 1);
     const completionRate =
       learners === 0 || lessons === 0
         ? 0
@@ -140,6 +139,7 @@ export async function GET() {
           email: true,
           name: true,
           _count: { select: { entitlements: true } },
+          entitlements: { select: { course: { select: { _count: { select: { lessons: true } } } } } },
         },
       })
     : [];
@@ -153,6 +153,7 @@ export async function GET() {
       name: u?.name ?? null,
       courses: u?._count.entitlements ?? 0,
       completedLessons: row._count._all,
+      totalLessons: u?.entitlements.reduce((sum, entry) => sum + entry.course._count.lessons, 0) ?? 0,
     };
   });
 
