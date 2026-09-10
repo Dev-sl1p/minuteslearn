@@ -253,3 +253,45 @@ test('inactive upstream licenses revoke local access and playback', async () => 
   assert.equal(entitlementStatus, 'REVOKED');
   assert.equal(playbackEnded, true);
 });
+
+test('resource download is strictly gated by course license access', async () => {
+  let courseAllowed = false;
+  const source = loadSource('src/app/api/learn/resources/[id]/download/route.ts', {
+    'next/server': next,
+    '@/lib/auth': { auth: async () => ({ user: { id: 'student-1', role: 'USER' } }) },
+    '@/lib/db': {
+      prisma: {
+        lessonResource: {
+          findUnique: async () => ({
+            id: 'res-1',
+            title: 'Exercise Files',
+            url: 'https://example.invalid/files.zip',
+            storagePath: null,
+            lesson: { id: 'lesson-1', courseId: 'course-1', course: { published: true } },
+          }),
+        },
+      },
+    },
+    '@/lib/redeem': { userHasCourseAccess: async (_uid, _cid) => courseAllowed },
+    '@/lib/supabase-admin': {
+      supabaseStorageConfigured: () => true,
+      storageBucket: () => 'materials',
+      getSupabaseAdmin: () => ({
+        storage: { from: () => ({ createSignedUrl: async () => ({ data: { signedUrl: 'https://signed.invalid/file' }, error: null }) }) },
+      }),
+    },
+  });
+
+  // Without course license: 403 Forbidden
+  const deniedRes = await source.GET(new Request('https://app.invalid/api/learn/resources/res-1/download'), { params: Promise.resolve({ id: 'res-1' }) });
+  assert.equal(deniedRes.status, 403);
+
+  // With active course license: 200 OK with material URL
+  courseAllowed = true;
+  const allowedRes = await source.GET(new Request('https://app.invalid/api/learn/resources/res-1/download'), { params: Promise.resolve({ id: 'res-1' }) });
+  assert.equal(allowedRes.status, 200);
+  const data = await allowedRes.json();
+  assert.equal(data.url, 'https://example.invalid/files.zip');
+  assert.equal(data.mode, 'external');
+});
+

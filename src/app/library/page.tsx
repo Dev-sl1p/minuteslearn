@@ -1,8 +1,10 @@
-import Link from "next/link";
 import { redirect } from "next/navigation";
-import { CoverImage } from "@/components/cover-image";
-import { Icon } from "@/components/icon";
 import { LearnerShell } from "@/components/learner-shell";
+import {
+  LibraryView,
+  type LibraryCourseItem,
+  type LibraryMaterialItem,
+} from "@/components/library-view";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 
@@ -17,9 +19,26 @@ export default async function LibraryPage() {
     session.user.email?.split("@")[0] ||
     "ผู้เรียน";
 
-  const lessonSelect = { id: true, slug: true, order: true } as const;
+  const lessonSelect = {
+    id: true,
+    title: true,
+    slug: true,
+    order: true,
+    resources: {
+      orderBy: { order: "asc" as const },
+      select: {
+        id: true,
+        title: true,
+        storagePath: true,
+        url: true,
+        mimeType: true,
+        sizeBytes: true,
+        order: true,
+      },
+    },
+  } as const;
 
-  const [entitlements, adminCourses, completedRowsRaw] = await Promise.all([
+  const [entitlements, adminCourses, completedRowsRaw, licenses] = await Promise.all([
     isAdmin
       ? Promise.resolve([])
       : prisma.entitlement.findMany({
@@ -51,7 +70,18 @@ export default async function LibraryPage() {
       where: { userId },
       select: { courseId: true, lessonId: true, updatedAt: true, completed: true },
     }),
+    isAdmin
+      ? Promise.resolve([])
+      : prisma.license.findMany({
+          where: { userId },
+          select: { id: true, key: true, courseId: true },
+        }),
   ]);
+
+  const licenseByKeyId = new Map(licenses.map((l) => [l.id, l.key]));
+  const licenseByCourseId = new Map(
+    licenses.filter((l) => l.courseId).map((l) => [l.courseId!, l.key]),
+  );
 
   const courseIds = new Set(
     isAdmin
@@ -76,22 +106,7 @@ export default async function LibraryPage() {
     }
   }
 
-  type Item = {
-    key: string;
-    courseId: string;
-    href: string;
-    continueHref: string;
-    title: string;
-    description: string;
-    coverUrl: string | null;
-    badge: string | null;
-    badgeOk: boolean;
-    totalLessons: number;
-    doneLessons: number;
-    percent: number;
-  };
-
-  const items: Item[] = isAdmin
+  const items: LibraryCourseItem[] = isAdmin
     ? adminCourses.map((c) => {
         const done = completedByCourse.get(c.id) ?? 0;
         const total = c._count.lessons;
@@ -103,9 +118,28 @@ export default async function LibraryPage() {
         );
         const next =
           c.lessons.find((l) => !completedIds.has(l.id)) ?? c.lessons[0];
+
+        const materials: LibraryMaterialItem[] = c.lessons.flatMap((l) =>
+          l.resources.map((r) => ({
+            id: r.id,
+            title: r.title,
+            lessonId: l.id,
+            lessonTitle: l.title,
+            lessonOrder: l.order,
+            courseId: c.id,
+            courseTitle: c.title,
+            courseSlug: c.slug,
+            mimeType: r.mimeType,
+            sizeBytes: r.sizeBytes,
+            isExternal: Boolean(r.url),
+            order: r.order,
+          })),
+        );
+
         return {
           key: c.id,
           courseId: c.id,
+          slug: c.slug,
           href: `/learn/${c.slug}`,
           continueHref: next
             ? `/learn/${c.slug}/${next.slug}`
@@ -118,6 +152,8 @@ export default async function LibraryPage() {
           totalLessons: total,
           doneLessons: done,
           percent,
+          licenseKey: null,
+          materials,
         };
       })
     : entitlements.map((e) => {
@@ -132,9 +168,28 @@ export default async function LibraryPage() {
         const next =
           e.course.lessons.find((l) => !completedIds.has(l.id)) ??
           e.course.lessons[0];
+
+        const materials: LibraryMaterialItem[] = e.course.lessons.flatMap((l) =>
+          l.resources.map((r) => ({
+            id: r.id,
+            title: r.title,
+            lessonId: l.id,
+            lessonTitle: l.title,
+            lessonOrder: l.order,
+            courseId: e.courseId,
+            courseTitle: e.course.title,
+            courseSlug: e.course.slug,
+            mimeType: r.mimeType,
+            sizeBytes: r.sizeBytes,
+            isExternal: Boolean(r.url),
+            order: r.order,
+          })),
+        );
+
         return {
           key: e.id,
           courseId: e.courseId,
+          slug: e.course.slug,
           href: `/learn/${e.course.slug}`,
           continueHref: next
             ? `/learn/${e.course.slug}/${next.slug}`
@@ -147,6 +202,11 @@ export default async function LibraryPage() {
           totalLessons: total,
           doneLessons: done,
           percent,
+          licenseKey:
+            (e.licenseId ? licenseByKeyId.get(e.licenseId) : null) ??
+            licenseByCourseId.get(e.courseId) ??
+            null,
+          materials,
         };
       });
 
@@ -159,165 +219,17 @@ export default async function LibraryPage() {
         return bAct - aAct;
       })[0] ??
     items.find((i) => i.percent < 100) ??
-    items[0];
+    items[0] ??
+    null;
 
   return (
     <LearnerShell>
-      <div className="dash page-enter">
-        <header className="dash__intro">
-          <h1 className="page-title">
-            {isAdmin ? "คอร์สทั้งหมด (แอดมิน)" : `ยินดีต้อนรับกลับมา, ${greeting}`}
-          </h1>
-          <p className="page-lead">
-            {isAdmin ? (
-              <>
-                แอดมินเข้าเรียนได้ทุกคอร์ส ·{" "}
-                <Link href="/admin">ไปหลังบ้าน</Link>
-              </>
-            ) : (
-              <>
-                มีความคืบหน้าดี — มาเรียนต่อกันเถอะ ·{" "}
-                <Link href="/redeem">เพิ่มคีย์</Link>
-              </>
-            )}
-          </p>
-        </header>
-
-        {items.length === 0 ? (
-          <div className="panel anim-rise">
-            <p className="muted" style={{ margin: 0 }}>
-              ยังไม่มีคอร์ส — ไป{" "}
-              <Link href="/redeem">ใส่คีย์</Link> หรือซื้อที่{" "}
-              <a
-                href="https://minutessharing.com/"
-                target="_blank"
-                rel="noreferrer"
-              >
-                minutessharing.com
-              </a>
-            </p>
-          </div>
-        ) : (
-          <>
-            {continueItem && (
-              <section className="dash-bento anim-rise">
-                <article className="dash-continue">
-                  <div className="dash-continue__media">
-                    {continueItem.coverUrl ? (
-                      <CoverImage src={continueItem.coverUrl} loading="eager" />
-                    ) : (
-                      <div className="dash-continue__fallback" aria-hidden>
-                        {continueItem.title.slice(0, 1)}
-                      </div>
-                    )}
-                    <span className="dash-continue__chip">เรียนต่อ</span>
-                  </div>
-                  <div className="dash-continue__body">
-                    <p className="dash-continue__eyebrow">คอร์สล่าสุด</p>
-                    <h2>{continueItem.title}</h2>
-                    <p>{continueItem.description}</p>
-                    <div className="dash-progress">
-                      <div className="dash-progress__meta">
-                        <span>ความคืบหน้า</span>
-                        <span>{continueItem.percent}%</span>
-                      </div>
-                      <div className="dash-progress__track">
-                        <div
-                          className="dash-progress__fill"
-                          style={{ width: `${continueItem.percent}%` }}
-                        />
-                      </div>
-                    </div>
-                    <Link
-                      href={continueItem.continueHref}
-                      className="btn btn--primary"
-                    >
-                      เรียนต่อ
-                    </Link>
-                  </div>
-                </article>
-
-                <aside className="dash-stat panel">
-                  <div className="dash-stat__icon" aria-hidden>
-                    <Icon name="school" size={28} />
-                  </div>
-                  <p className="dash-stat__value">{items.length}</p>
-                  <p className="dash-stat__label">คอร์สที่เข้าถึงได้</p>
-                  <p className="muted" style={{ margin: "0.75rem 0 0" }}>
-                    ผ่านแล้วเฉลี่ย{" "}
-                    {items.length
-                      ? Math.round(
-                          items.reduce((s, i) => s + i.percent, 0) /
-                            items.length,
-                        )
-                      : 0}
-                    %
-                  </p>
-                </aside>
-              </section>
-            )}
-
-            <section className="dash-section">
-              <div className="dash-section__head">
-                <h2>คอร์สเรียนทั้งหมดของคุณ</h2>
-              </div>
-              <div className="course-grid">
-                {items.map((item, i) => (
-                  <Link
-                    key={item.key}
-                    href={item.href}
-                    className="course-card course-card--media anim-rise"
-                    style={{ animationDelay: `${Math.min(i, 8) * 45}ms` }}
-                  >
-                    <div className="course-card__thumb">
-                      {item.coverUrl ? (
-                        <CoverImage src={item.coverUrl} />
-                      ) : (
-                        <div className="course-card__thumb-fallback" aria-hidden>
-                          {item.title.slice(0, 1)}
-                        </div>
-                      )}
-                    </div>
-                    <div className="course-card__body">
-                      <div className="course-card__head">
-                        <h3>{item.title}</h3>
-                        {item.badge && (
-                          <span
-                            className={`badge ${item.badgeOk ? "badge--ok" : "badge--bad"}`}
-                          >
-                            {item.badge}
-                          </span>
-                        )}
-                      </div>
-                      <p>{item.description}</p>
-                      <div className="dash-progress dash-progress--card">
-                        <div className="dash-progress__meta">
-                          <span>
-                            {item.doneLessons}/{item.totalLessons} บท
-                          </span>
-                          <span>{item.percent}%</span>
-                        </div>
-                        <div className="dash-progress__track">
-                          <div
-                            className="dash-progress__fill"
-                            style={{ width: `${item.percent}%` }}
-                          />
-                        </div>
-                      </div>
-                      <div className="course-card__foot">
-                        <span className="course-card__action">
-                          {item.percent > 0 ? "เรียนต่อ" : "เริ่มเรียน"}
-                          <Icon name="arrow_forward" size={16} />
-                        </span>
-                      </div>
-                    </div>
-                  </Link>
-                ))}
-              </div>
-            </section>
-          </>
-        )}
-      </div>
+      <LibraryView
+        items={items}
+        continueItem={continueItem}
+        isAdmin={isAdmin}
+        greeting={greeting}
+      />
     </LearnerShell>
   );
 }

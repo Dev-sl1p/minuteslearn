@@ -187,3 +187,80 @@ test('device identification still works when browser storage is disabled', () =>
   assert.match(first, /^fp_[a-f0-9-]+$/);
   assert.equal(source.getDeviceFingerprint(), first);
 });
+
+test('formatBytes and getFileTypeMeta handle file sizes and formats accurately', () => {
+  const source = loadSource('src/components/library-view.tsx', {
+    react: reactHarness().react,
+    'react/jsx-runtime': jsx,
+    'next/link': 'Link',
+    '@/components/cover-image': {},
+    '@/components/icon': {},
+    '@/components/toast': { useToast: () => ({ error() {}, info() {} }) },
+  });
+
+  assert.equal(source.formatBytes(500), '500 B');
+  assert.equal(source.formatBytes(2048), '2.0 KB');
+  assert.equal(source.formatBytes(15 * 1024 * 1024), '15.0 MB');
+  assert.equal(source.formatBytes(null), null);
+
+  assert.equal(source.getFileTypeMeta('application/pdf', 'document.pdf', false).kind, 'pdf');
+  assert.equal(source.getFileTypeMeta('application/zip', 'files.zip', false).kind, 'zip');
+  assert.equal(source.getFileTypeMeta('image/png', 'cover.png', false).kind, 'img');
+  assert.equal(source.getFileTypeMeta(null, 'project.zip', false).kind, 'zip');
+  assert.equal(source.getFileTypeMeta(null, 'resource', true).kind, 'link');
+});
+
+test('LibraryView renders course tabs and displays material count badge', () => {
+  const hooks = reactHarness();
+  const source = loadSource('src/components/library-view.tsx', {
+    react: hooks.react,
+    'react/jsx-runtime': jsx,
+    'next/link': 'Link',
+    '@/components/cover-image': {},
+    '@/components/icon': {},
+    '@/components/toast': { useToast: () => ({ error() {}, info() {} }) },
+  }, { window: { location: { hash: '', search: '', href: 'https://app.invalid/library' }, history: { replaceState() {} } } });
+
+  const mockItems = [
+    {
+      key: 'c1',
+      courseId: 'c1',
+      slug: 'course-1',
+      href: '/learn/course-1',
+      continueHref: '/learn/course-1/lesson-1',
+      title: 'Course One',
+      description: 'First course',
+      coverUrl: null,
+      badge: null,
+      badgeOk: true,
+      totalLessons: 5,
+      doneLessons: 2,
+      percent: 40,
+      licenseKey: 'MS-1111-2222',
+      materials: [
+        { id: 'm1', title: 'Cheatsheet', lessonId: 'l1', lessonTitle: 'Intro', lessonOrder: 1, courseId: 'c1', courseTitle: 'Course One', courseSlug: 'course-1', mimeType: 'application/pdf', sizeBytes: 1048576, isExternal: false, order: 0 },
+        { id: 'm2', title: 'Project Template', lessonId: 'l2', lessonTitle: 'Setup', lessonOrder: 2, courseId: 'c1', courseTitle: 'Course One', courseSlug: 'course-1', mimeType: 'application/zip', sizeBytes: 5242880, isExternal: false, order: 1 },
+      ],
+    },
+  ];
+
+  const { tree } = hooks.render(source.LibraryView, {
+    items: mockItems,
+    continueItem: mockItems[0],
+    isAdmin: false,
+    greeting: 'John',
+  });
+
+  const text = (node) =>
+    node == null || typeof node === 'boolean'
+      ? ''
+      : typeof node !== 'object'
+        ? String(node)
+        : [node.props?.children].flat(Infinity).map(text).join('');
+
+  const fullText = text(tree);
+  assert.ok(fullText.includes('คอร์สเรียนของฉัน'));
+  assert.ok(fullText.includes('ไฟล์ประกอบการเรียน'));
+  assert.ok(fullText.includes('2 ไฟล์')); // Course card material button
+});
+

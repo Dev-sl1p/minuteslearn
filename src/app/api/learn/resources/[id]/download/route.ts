@@ -2,7 +2,6 @@ import { NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { userHasCourseAccess } from "@/lib/redeem";
-import { userHasLessonAccess } from "@/lib/progress";
 import {
   getSupabaseAdmin,
   storageBucket,
@@ -34,8 +33,7 @@ export async function GET(_req: Request, { params }: Props) {
     resource.lesson.courseId,
     { isAdmin: session.user.role === "ADMIN" },
   );
-  if (!allowed || (!resource.lesson.course.published && session.user.role !== "ADMIN")
-    || !(await userHasLessonAccess(session.user.id, resource.lesson.id, resource.lesson.courseId, session.user.role === "ADMIN"))) {
+  if (!allowed || (!resource.lesson.course.published && session.user.role !== "ADMIN")) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
