@@ -18,14 +18,19 @@ async function requireAdmin() {
   return session;
 }
 
-const schema = z.object({
-  resourceId: z.string().min(1),
-  lessonId: z.string().min(1),
-  title: z.string().min(1).max(200),
-  storagePath: z.string().min(1).max(500),
-  mimeType: z.string().min(1).max(120),
-  sizeBytes: z.number().int().positive(),
-});
+const schema = z
+  .object({
+    resourceId: z.string().min(1),
+    courseId: z.string().min(1).optional(),
+    lessonId: z.string().min(1).nullable().optional(),
+    title: z.string().min(1).max(200),
+    storagePath: z.string().min(1).max(500),
+    mimeType: z.string().min(1).max(120),
+    sizeBytes: z.number().int().positive(),
+  })
+  .refine((data) => Boolean(data.courseId || data.lessonId), {
+    message: "กรุณาระบุคอร์สเรียนหรือบทเรียน",
+  });
 
 async function objectExists(storagePath: string) {
   const { data, error } = await getSupabaseAdmin()
@@ -56,22 +61,43 @@ export async function POST(req: Request) {
     );
   }
 
-  const { resourceId, lessonId, storagePath, sizeBytes } = parsed.data;
+  const { resourceId, storagePath, sizeBytes } = parsed.data;
   const mime = parsed.data.mimeType;
 
   if (sizeBytes > RESOURCE_MAX_BYTES || !isAllowedResourceMime(mime)) {
     return NextResponse.json({ error: "ข้อมูลไฟล์ไม่ถูกต้อง" }, { status: 400 });
   }
 
-  const lesson = await prisma.lesson.findUnique({
-    where: { id: lessonId },
-    select: { id: true, courseId: true },
-  });
-  if (!lesson) {
-    return NextResponse.json({ error: "ไม่พบบทเรียน" }, { status: 404 });
+  let targetCourseId: string;
+  let targetLessonId: string | null = null;
+
+  if (parsed.data.lessonId) {
+    const lesson = await prisma.lesson.findUnique({
+      where: { id: parsed.data.lessonId },
+      select: { id: true, courseId: true },
+    });
+    if (!lesson) {
+      return NextResponse.json({ error: "ไม่พบบทเรียน" }, { status: 404 });
+    }
+    targetCourseId = lesson.courseId;
+    targetLessonId = lesson.id;
+  } else if (parsed.data.courseId) {
+    const course = await prisma.course.findUnique({
+      where: { id: parsed.data.courseId },
+      select: { id: true },
+    });
+    if (!course) {
+      return NextResponse.json({ error: "ไม่พบคอร์สเรียน" }, { status: 404 });
+    }
+    targetCourseId = course.id;
+  } else {
+    return NextResponse.json({ error: "กรุณาระบุคอร์สหรือบทเรียน" }, { status: 400 });
   }
 
-  const expectedPrefix = `${lesson.courseId}/${lesson.id}/`;
+  const expectedPrefix = targetLessonId
+    ? `${targetCourseId}/${targetLessonId}/`
+    : `${targetCourseId}/general/`;
+
   if (
     !storagePath.startsWith(expectedPrefix) ||
     storagePath.includes("..") ||
@@ -101,14 +127,17 @@ export async function POST(req: Request) {
   }
 
   const max = await prisma.lessonResource.aggregate({
-    where: { lessonId: lesson.id },
+    where: targetLessonId
+      ? { lessonId: targetLessonId }
+      : { courseId: targetCourseId, lessonId: null },
     _max: { order: true },
   });
 
   const resource = await prisma.lessonResource.create({
     data: {
       id: resourceId,
-      lessonId: lesson.id,
+      courseId: targetCourseId,
+      lessonId: targetLessonId,
       title: sanitizeText(parsed.data.title, 200),
       storagePath,
       mimeType: mime,
@@ -124,7 +153,8 @@ export async function POST(req: Request) {
     actorEmail: session.user.email,
     meta: {
       resourceId: resource.id,
-      lessonId: lesson.id,
+      courseId: targetCourseId,
+      lessonId: targetLessonId,
       storagePath,
       sizeBytes,
     },

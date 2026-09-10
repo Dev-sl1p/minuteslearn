@@ -40,6 +40,7 @@ export async function GET() {
   const courses = await prisma.course.findMany({
     include: {
       modules: { orderBy: { order: "asc" } },
+      resources: { orderBy: { order: "asc" } },
       lessons: {
         orderBy: { order: "asc" },
         include: {
@@ -88,6 +89,7 @@ export async function POST(req: Request) {
           data,
           include: {
             modules: { orderBy: { order: "asc" } },
+            resources: { orderBy: { order: "asc" } },
             lessons: {
               orderBy: { order: "asc" },
               include: { resources: { orderBy: { order: "asc" } } },
@@ -99,6 +101,7 @@ export async function POST(req: Request) {
           data,
           include: {
             modules: { orderBy: { order: "asc" } },
+            resources: { orderBy: { order: "asc" } },
             lessons: {
               orderBy: { order: "asc" },
               include: { resources: { orderBy: { order: "asc" } } },

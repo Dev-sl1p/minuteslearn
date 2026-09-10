@@ -19,13 +19,18 @@ async function requireAdmin() {
   return session;
 }
 
-const schema = z.object({
-  lessonId: z.string().min(1),
-  title: z.string().max(200).optional(),
-  fileName: z.string().min(1).max(240),
-  mimeType: z.string().max(120).optional().nullable(),
-  sizeBytes: z.number().int().positive(),
-});
+const schema = z
+  .object({
+    courseId: z.string().min(1).optional(),
+    lessonId: z.string().min(1).nullable().optional(),
+    title: z.string().max(200).optional(),
+    fileName: z.string().min(1).max(240),
+    mimeType: z.string().max(120).optional().nullable(),
+    sizeBytes: z.number().int().positive(),
+  })
+  .refine((data) => Boolean(data.courseId || data.lessonId), {
+    message: "กรุณาระบุคอร์สเรียนหรือบทเรียน",
+  });
 
 export async function POST(req: Request) {
   const session = await requireAdmin();
@@ -52,7 +57,7 @@ export async function POST(req: Request) {
     );
   }
 
-  const { lessonId, fileName, sizeBytes } = parsed.data;
+  const { fileName, sizeBytes } = parsed.data;
   const mime = resolveResourceMime(fileName, parsed.data.mimeType);
 
   if (sizeBytes > RESOURCE_MAX_BYTES) {
@@ -74,12 +79,30 @@ export async function POST(req: Request) {
     );
   }
 
-  const lesson = await prisma.lesson.findUnique({
-    where: { id: lessonId },
-    select: { id: true, courseId: true },
-  });
-  if (!lesson) {
-    return NextResponse.json({ error: "ไม่พบบทเรียน" }, { status: 404 });
+  let targetCourseId: string;
+  let targetLessonId: string | null = null;
+
+  if (parsed.data.lessonId) {
+    const lesson = await prisma.lesson.findUnique({
+      where: { id: parsed.data.lessonId },
+      select: { id: true, courseId: true },
+    });
+    if (!lesson) {
+      return NextResponse.json({ error: "ไม่พบบทเรียน" }, { status: 404 });
+    }
+    targetCourseId = lesson.courseId;
+    targetLessonId = lesson.id;
+  } else if (parsed.data.courseId) {
+    const course = await prisma.course.findUnique({
+      where: { id: parsed.data.courseId },
+      select: { id: true },
+    });
+    if (!course) {
+      return NextResponse.json({ error: "ไม่พบคอร์สเรียน" }, { status: 404 });
+    }
+    targetCourseId = course.id;
+  } else {
+    return NextResponse.json({ error: "กรุณาระบุคอร์สหรือบทเรียน" }, { status: 400 });
   }
 
   const title =
@@ -89,7 +112,9 @@ export async function POST(req: Request) {
     ) || "เอกสาร";
   const resourceId = randomUUID();
   const safeName = safeStorageFileName(fileName) || "file";
-  const storagePath = `${lesson.courseId}/${lesson.id}/${resourceId}-${safeName}`;
+  const storagePath = targetLessonId
+    ? `${targetCourseId}/${targetLessonId}/${resourceId}-${safeName}`
+    : `${targetCourseId}/general/${resourceId}-${safeName}`;
   const bucket = storageBucket();
 
   const { data, error } = await getSupabaseAdmin()
@@ -107,7 +132,8 @@ export async function POST(req: Request) {
 
   return NextResponse.json({
     resourceId,
-    lessonId: lesson.id,
+    courseId: targetCourseId,
+    lessonId: targetLessonId,
     title,
     mimeType: mime,
     sizeBytes,

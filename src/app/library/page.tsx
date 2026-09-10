@@ -38,6 +38,17 @@ export default async function LibraryPage() {
     },
   } as const;
 
+  const courseResourceSelect = {
+    id: true,
+    title: true,
+    storagePath: true,
+    url: true,
+    mimeType: true,
+    sizeBytes: true,
+    order: true,
+    lessonId: true,
+  } as const;
+
   const [entitlements, adminCourses, completedRowsRaw, licenses] = await Promise.all([
     isAdmin
       ? Promise.resolve([])
@@ -50,6 +61,11 @@ export default async function LibraryPage() {
           include: {
             course: {
               include: {
+                resources: {
+                  where: { lessonId: null },
+                  orderBy: { order: "asc" },
+                  select: courseResourceSelect,
+                },
                 lessons: { orderBy: { order: "asc" }, select: lessonSelect },
                 _count: { select: { lessons: true } },
               },
@@ -61,6 +77,11 @@ export default async function LibraryPage() {
       ? prisma.course.findMany({
           orderBy: { updatedAt: "desc" },
           include: {
+            resources: {
+              where: { lessonId: null },
+              orderBy: { order: "asc" },
+              select: courseResourceSelect,
+            },
             lessons: { orderBy: { order: "asc" }, select: lessonSelect },
             _count: { select: { lessons: true } },
           },
@@ -119,7 +140,24 @@ export default async function LibraryPage() {
         const next =
           c.lessons.find((l) => !completedIds.has(l.id)) ?? c.lessons[0];
 
-        const materials: LibraryMaterialItem[] = c.lessons.flatMap((l) =>
+        const courseMaterials: LibraryMaterialItem[] = (c.resources ?? []).map(
+          (r) => ({
+            id: r.id,
+            title: r.title,
+            lessonId: null,
+            lessonTitle: "ไฟล์รวมประจำคอร์ส",
+            lessonOrder: null,
+            courseId: c.id,
+            courseTitle: c.title,
+            courseSlug: c.slug,
+            mimeType: r.mimeType,
+            sizeBytes: r.sizeBytes,
+            isExternal: Boolean(r.url),
+            order: r.order,
+          }),
+        );
+
+        const lessonMaterials: LibraryMaterialItem[] = c.lessons.flatMap((l) =>
           l.resources.map((r) => ({
             id: r.id,
             title: r.title,
@@ -135,6 +173,8 @@ export default async function LibraryPage() {
             order: r.order,
           })),
         );
+
+        const materials = [...courseMaterials, ...lessonMaterials];
 
         return {
           key: c.id,
@@ -169,22 +209,42 @@ export default async function LibraryPage() {
           e.course.lessons.find((l) => !completedIds.has(l.id)) ??
           e.course.lessons[0];
 
-        const materials: LibraryMaterialItem[] = e.course.lessons.flatMap((l) =>
-          l.resources.map((r) => ({
-            id: r.id,
-            title: r.title,
-            lessonId: l.id,
-            lessonTitle: l.title,
-            lessonOrder: l.order,
-            courseId: e.courseId,
-            courseTitle: e.course.title,
-            courseSlug: e.course.slug,
-            mimeType: r.mimeType,
-            sizeBytes: r.sizeBytes,
-            isExternal: Boolean(r.url),
-            order: r.order,
-          })),
+        const courseMaterials: LibraryMaterialItem[] = (
+          e.course.resources ?? []
+        ).map((r) => ({
+          id: r.id,
+          title: r.title,
+          lessonId: null,
+          lessonTitle: "ไฟล์รวมประจำคอร์ส",
+          lessonOrder: null,
+          courseId: e.courseId,
+          courseTitle: e.course.title,
+          courseSlug: e.course.slug,
+          mimeType: r.mimeType,
+          sizeBytes: r.sizeBytes,
+          isExternal: Boolean(r.url),
+          order: r.order,
+        }));
+
+        const lessonMaterials: LibraryMaterialItem[] = e.course.lessons.flatMap(
+          (l) =>
+            l.resources.map((r) => ({
+              id: r.id,
+              title: r.title,
+              lessonId: l.id,
+              lessonTitle: l.title,
+              lessonOrder: l.order,
+              courseId: e.courseId,
+              courseTitle: e.course.title,
+              courseSlug: e.course.slug,
+              mimeType: r.mimeType,
+              sizeBytes: r.sizeBytes,
+              isExternal: Boolean(r.url),
+              order: r.order,
+            })),
         );
+
+        const materials = [...courseMaterials, ...lessonMaterials];
 
         return {
           key: e.id,

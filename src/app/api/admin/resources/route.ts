@@ -16,11 +16,16 @@ async function requireAdmin() {
   return session;
 }
 
-const linkSchema = z.object({
-  lessonId: z.string().min(1),
-  title: z.string().min(1).max(200),
-  url: httpsUrlSchema,
-});
+const linkSchema = z
+  .object({
+    courseId: z.string().min(1).optional(),
+    lessonId: z.string().min(1).nullable().optional(),
+    title: z.string().min(1).max(200),
+    url: httpsUrlSchema,
+  })
+  .refine((data) => Boolean(data.courseId || data.lessonId), {
+    message: "กรุณาระบุคอร์สเรียนหรือบทเรียน",
+  });
 
 export async function POST(req: Request) {
   const session = await requireAdmin();
@@ -37,22 +42,43 @@ export async function POST(req: Request) {
     );
   }
 
-  const lesson = await prisma.lesson.findUnique({
-    where: { id: parsed.data.lessonId },
-    select: { id: true, courseId: true },
-  });
-  if (!lesson) {
-    return NextResponse.json({ error: "ไม่พบบทเรียน" }, { status: 404 });
+  let targetCourseId: string;
+  let targetLessonId: string | null = null;
+
+  if (parsed.data.lessonId) {
+    const lesson = await prisma.lesson.findUnique({
+      where: { id: parsed.data.lessonId },
+      select: { id: true, courseId: true },
+    });
+    if (!lesson) {
+      return NextResponse.json({ error: "ไม่พบบทเรียน" }, { status: 404 });
+    }
+    targetCourseId = lesson.courseId;
+    targetLessonId = lesson.id;
+  } else if (parsed.data.courseId) {
+    const course = await prisma.course.findUnique({
+      where: { id: parsed.data.courseId },
+      select: { id: true },
+    });
+    if (!course) {
+      return NextResponse.json({ error: "ไม่พบคอร์สเรียน" }, { status: 404 });
+    }
+    targetCourseId = course.id;
+  } else {
+    return NextResponse.json({ error: "กรุณาระบุคอร์สหรือบทเรียน" }, { status: 400 });
   }
 
   const max = await prisma.lessonResource.aggregate({
-    where: { lessonId: lesson.id },
+    where: targetLessonId
+      ? { lessonId: targetLessonId }
+      : { courseId: targetCourseId, lessonId: null },
     _max: { order: true },
   });
 
   const resource = await prisma.lessonResource.create({
     data: {
-      lessonId: lesson.id,
+      courseId: targetCourseId,
+      lessonId: targetLessonId,
       title: sanitizeText(parsed.data.title, 200),
       url: parsed.data.url.trim(),
       order: (max._max.order ?? 0) + 1,
@@ -64,7 +90,11 @@ export async function POST(req: Request) {
     message: `Linked resource ${resource.title}`,
     actorId: session.user.id,
     actorEmail: session.user.email,
-    meta: { resourceId: resource.id, lessonId: lesson.id },
+    meta: {
+      resourceId: resource.id,
+      courseId: targetCourseId,
+      lessonId: targetLessonId,
+    },
   });
 
   return NextResponse.json({ resource });
@@ -103,7 +133,11 @@ export async function DELETE(req: Request) {
     message: `Deleted resource ${id}`,
     actorId: session.user.id,
     actorEmail: session.user.email,
-    meta: { resourceId: id, lessonId: existing.lessonId },
+    meta: {
+      resourceId: id,
+      courseId: existing.courseId,
+      lessonId: existing.lessonId,
+    },
   });
 
   return NextResponse.json({ ok: true });

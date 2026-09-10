@@ -13,6 +13,8 @@ import { fetchWithTimeout as fetch } from "@/lib/client-fetch";
 
 type LessonResource = {
   id: string;
+  courseId?: string | null;
+  lessonId?: string | null;
   title: string;
   storagePath: string | null;
   url: string | null;
@@ -50,6 +52,7 @@ type Course = {
   published: boolean;
   modules: CourseModule[];
   lessons: Lesson[];
+  resources?: LessonResource[];
   _count: { entitlements: number; licenses: number };
 };
 
@@ -1074,27 +1077,36 @@ export function AdminDashboard() {
   }
 
   async function addResourceLink(
-    eOrLessonId: React.FormEvent | string,
+    eOrTarget?:
+      | React.FormEvent
+      | string
+      | { courseId?: string; lessonId?: string | null },
     maybeTitle?: string,
     maybeUrl?: string,
   ) {
-    let targetLessonId: string;
-    let title: string;
-    let url: string;
+    let targetLessonId: string | null = null;
+    let targetCourseId: string | undefined;
+    let title = "";
+    let url = "";
 
-    if (typeof eOrLessonId === "string") {
-      targetLessonId = eOrLessonId;
-      title = (maybeTitle || "").trim();
-      url = (maybeUrl || "").trim();
-    } else {
-      eOrLessonId.preventDefault();
+    if (eOrTarget && typeof eOrTarget === "object" && "preventDefault" in eOrTarget) {
+      eOrTarget.preventDefault();
       targetLessonId = lessonForm.id;
       title = resourceTitle.trim();
       url = resourceUrl.trim();
+    } else if (typeof eOrTarget === "object" && eOrTarget !== null) {
+      targetCourseId = eOrTarget.courseId;
+      targetLessonId = eOrTarget.lessonId ?? null;
+      title = (maybeTitle || "").trim();
+      url = (maybeUrl || "").trim();
+    } else {
+      targetLessonId = typeof eOrTarget === "string" ? eOrTarget : lessonForm.id;
+      title = (maybeTitle || resourceTitle).trim();
+      url = (maybeUrl || resourceUrl).trim();
     }
 
-    if (!targetLessonId) {
-      toast.error("บันทึกบทเรียนก่อน แล้วค่อยแนบไฟล์");
+    if (!targetLessonId && !targetCourseId) {
+      toast.error("เลือกบทเรียนหรือคอร์สก่อน");
       return;
     }
     if (!title || !url) {
@@ -1107,7 +1119,12 @@ export function AdminDashboard() {
       const res = await fetch("/api/admin/resources", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ lessonId: targetLessonId, title, url }),
+        body: JSON.stringify({
+          courseId: targetCourseId,
+          lessonId: targetLessonId || undefined,
+          title,
+          url,
+        }),
       });
       const data = await res.json();
       if (!res.ok) {
@@ -1145,12 +1162,23 @@ export function AdminDashboard() {
 
   async function uploadResource(
     file: File,
-    targetLessonId?: string,
+    target?: string | { courseId?: string; lessonId?: string | null },
     overrideTitle?: string,
   ) {
-    const lessonId = targetLessonId || lessonForm.id;
-    if (!lessonId) {
-      toast.error("บันทึกบทเรียนก่อน แล้วค่อยอัปโหลด");
+    let lessonId: string | null = null;
+    let courseId: string | undefined;
+
+    if (typeof target === "object" && target !== null) {
+      courseId = target.courseId;
+      lessonId = target.lessonId ?? null;
+    } else if (typeof target === "string") {
+      lessonId = target;
+    } else {
+      lessonId = lessonForm.id;
+    }
+
+    if (!lessonId && !courseId) {
+      toast.error("เลือกบทเรียนหรือคอร์สก่อน แล้วค่อยอัปโหลด");
       return;
     }
 
@@ -1162,7 +1190,8 @@ export function AdminDashboard() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          lessonId,
+          courseId,
+          lessonId: lessonId || undefined,
           title: (overrideTitle || resourceTitle).trim() || file.name,
           fileName: file.name,
           mimeType: file.type || null,
@@ -1244,7 +1273,8 @@ export function AdminDashboard() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           resourceId,
-          lessonId,
+          courseId,
+          lessonId: lessonId || undefined,
           title,
           storagePath,
           mimeType: mime,
@@ -1643,7 +1673,13 @@ export function AdminDashboard() {
                         setTab("materials");
                       }}
                     >
-                      ไฟล์ประกอบ ({c.lessons.reduce((s, l) => s + (l.resources?.length ?? 0), 0)})
+                      ไฟล์ประกอบ (
+                        {(c.resources?.length ?? 0) +
+                          c.lessons.reduce(
+                            (s, l) => s + (l.resources?.length ?? 0),
+                            0,
+                          )}
+                      )
                     </button>
                     <Link
                       href={`/learn/${c.slug}`}

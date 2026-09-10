@@ -20,7 +20,14 @@ export async function GET(_req: Request, { params }: Props) {
   const resource = await prisma.lessonResource.findUnique({
     where: { id },
     include: {
-      lesson: { select: { id: true, courseId: true, course: { select: { published: true } } } },
+      course: { select: { id: true, published: true } },
+      lesson: {
+        select: {
+          id: true,
+          courseId: true,
+          course: { select: { published: true } },
+        },
+      },
     },
   });
 
@@ -28,12 +35,18 @@ export async function GET(_req: Request, { params }: Props) {
     return NextResponse.json({ error: "ไม่พบเอกสาร" }, { status: 404 });
   }
 
-  const allowed = await userHasCourseAccess(
-    session.user.id,
-    resource.lesson.courseId,
-    { isAdmin: session.user.role === "ADMIN" },
-  );
-  if (!allowed || (!resource.lesson.course.published && session.user.role !== "ADMIN")) {
+  const targetCourseId = resource.courseId ?? resource.lesson?.courseId;
+  const isPublished =
+    resource.course?.published ?? resource.lesson?.course?.published ?? false;
+
+  if (!targetCourseId) {
+    return NextResponse.json({ error: "ไม่พบคอร์สของเอกสารนี้" }, { status: 404 });
+  }
+
+  const allowed = await userHasCourseAccess(session.user.id, targetCourseId, {
+    isAdmin: session.user.role === "ADMIN",
+  });
+  if (!allowed || (!isPublished && session.user.role !== "ADMIN")) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 

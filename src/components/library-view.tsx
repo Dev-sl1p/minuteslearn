@@ -9,9 +9,9 @@ import { useToast } from "@/components/toast";
 export type LibraryMaterialItem = {
   id: string;
   title: string;
-  lessonId: string;
+  lessonId: string | null;
   lessonTitle: string;
-  lessonOrder: number;
+  lessonOrder: number | null;
   courseId: string;
   courseTitle: string;
   courseSlug: string;
@@ -616,9 +616,16 @@ export function LibraryView({
                                     </span>
                                   </div>
                                   <div className="material-row__sub">
-                                    <span className="material-lesson-tag">
-                                      บทที่ {mat.lessonOrder}: {mat.lessonTitle}
-                                    </span>
+                                    {mat.lessonOrder !== null ? (
+                                      <span className="material-lesson-tag">
+                                        บทที่ {mat.lessonOrder}: {mat.lessonTitle}
+                                      </span>
+                                    ) : (
+                                      <span className="material-lesson-tag material-lesson-tag--course">
+                                        <Icon name="layers" size={12} />
+                                        {mat.lessonTitle || "ไฟล์รวมประจำคอร์ส"}
+                                      </span>
+                                    )}
                                     {formattedSize && (
                                       <span className="material-size-tag">
                                         · {formattedSize}

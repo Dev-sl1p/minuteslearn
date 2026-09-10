@@ -320,6 +320,56 @@ test('AdminMaterials renders course selector, lesson dropdown, and submits links
   assert.ok(fullText.includes('Course Alpha'));
   assert.ok(fullText.includes('Course Beta'));
   assert.ok(fullText.includes('Worksheet 1'));
+  assert.ok(fullText.includes('ลงในบทเรียน'));
+  assert.ok(fullText.includes('ลงไม่ผูกกับบทเรียน'));
+});
+
+test('AdminMaterials choice for course-level attachment works without lessons', async () => {
+  const hooks = reactHarness();
+  const source = loadSource('src/components/admin-materials.tsx', {
+    react: hooks.react,
+    'react/jsx-runtime': jsx,
+    '@/components/icon': { Icon: 'Icon' },
+    '@/components/library-view': {
+      formatBytes: (b) => `${b} B`,
+      getFileTypeMeta: () => ({ icon: 'description', label: 'PDF', kind: 'pdf' }),
+    },
+  });
+
+  const emptyCourse = [
+    {
+      id: 'course-empty',
+      title: 'Empty Course',
+      slug: 'empty',
+      coverUrl: null,
+      lessons: [],
+      resources: [
+        { id: 'res-general', title: 'General Syllabus', storagePath: null, url: 'https://example.com/syllabus.pdf', mimeType: 'application/pdf', sizeBytes: 500, order: 1 }
+      ],
+    },
+  ];
+
+  const rendered = hooks.render(source.AdminMaterials, {
+    courses: emptyCourse,
+    initialCourseId: 'course-empty',
+    onUploadResource: async () => {},
+    onAddResourceLink: async () => {},
+    onDeleteResource: async () => {},
+    onGoCurriculum: () => {},
+    pending: false,
+  });
+
+  const text = (node) =>
+    node == null || typeof node === 'boolean'
+      ? ''
+      : typeof node !== 'object'
+        ? String(node)
+        : [node.props?.children].flat(Infinity).map(text).join('');
+
+  const fullText = text(rendered.tree);
+  assert.ok(fullText.includes('ลงไม่ผูกกับบทเรียน'));
+  assert.ok(fullText.includes('General Syllabus'));
+  assert.ok(fullText.includes('ไฟล์รวมคอร์ส'));
 });
 
 
