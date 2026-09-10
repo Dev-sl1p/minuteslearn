@@ -3941,16 +3941,23 @@ body:has(.learn-workspace) main {
 /* —— Admin Materials Management —— */
 .admin-materials-view {
   width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
 }
 
 .admin-materials-grid {
   display: grid;
   gap: 1.25rem;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
 }
 
-@media (min-width: 980px) {
+@media (min-width: 1040px) {
   .admin-materials-grid {
-    grid-template-columns: minmax(360px, 420px) 1fr;
+    grid-template-columns: minmax(320px, 390px) 1fr;
     align-items: start;
   }
 }
@@ -3959,7 +3966,17 @@ body:has(.learn-workspace) main {
   display: flex;
   flex-direction: column;
   gap: 1rem;
-  padding: 1.5rem;
+  padding: 1.25rem;
+  min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
+  overflow: hidden;
+}
+
+@media (min-width: 640px) {
+  .admin-materials-form-panel {
+    padding: 1.5rem;
+  }
 }
 
 .admin-materials-form-head {
@@ -3968,6 +3985,7 @@ body:has(.learn-workspace) main {
   gap: 0.85rem;
   padding-bottom: 0.85rem;
   border-bottom: 1px solid var(--line);
+  min-width: 0;
 }
 
 .admin-materials-icon-badge {
@@ -3986,12 +4004,25 @@ body:has(.learn-workspace) main {
   display: flex;
   flex-direction: column;
   gap: 1.25rem;
+  min-width: 0;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.admin-materials-form-body input,
+.admin-materials-form-body select,
+.admin-materials-form-body textarea {
+  max-width: 100%;
+  box-sizing: border-box;
 }
 
 .admin-form-step {
   display: flex;
   flex-direction: column;
   gap: 0.55rem;
+  min-width: 0;
+  width: 100%;
+  box-sizing: border-box;
 }
 
 .admin-step-label {
@@ -4001,6 +4032,7 @@ body:has(.learn-workspace) main {
   font-weight: 700;
   font-size: 0.9rem;
   color: var(--ink);
+  min-width: 0;
 }
 
 .admin-step-num {
@@ -4024,10 +4056,13 @@ body:has(.learn-workspace) main {
   font-size: 0.88rem;
   font-weight: 600;
   color: var(--ink);
+  min-width: 0;
+  max-width: 100%;
 }
 
 .admin-select {
   width: 100%;
+  max-width: 100%;
   padding: 0.6rem 0.85rem;
   border-radius: var(--radius-sm);
   border: 1px solid var(--line);
@@ -4036,6 +4071,7 @@ body:has(.learn-workspace) main {
   font-size: 0.9rem;
   color: var(--ink);
   cursor: pointer;
+  box-sizing: border-box;
   transition: border-color var(--anim-quick) var(--ease-out), box-shadow var(--anim-quick) var(--ease-out);
 }
 
@@ -4052,28 +4088,30 @@ body:has(.learn-workspace) main {
 
 /* Choice Cards: Attachment Scope */
 .admin-scope-choices {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 0.65rem;
-}
-
-@media (max-width: 480px) {
-  .admin-scope-choices {
-    grid-template-columns: 1fr;
-  }
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
 }
 
 .admin-scope-card {
   display: flex;
   align-items: flex-start;
   gap: 0.65rem;
-  padding: 0.85rem;
+  padding: 0.75rem 0.85rem;
   border-radius: var(--radius-md);
   border: 1.5px solid var(--line);
   background: #fff;
   text-align: left;
   cursor: pointer;
   font-family: inherit;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
   transition: all var(--anim-quick) var(--ease-out);
 }
 
@@ -4111,7 +4149,7 @@ body:has(.learn-workspace) main {
   min-width: 0;
   display: flex;
   flex-direction: column;
-  gap: 0.25rem;
+  gap: 0.2rem;
 }
 
 .admin-scope-card__title-row {
@@ -4149,12 +4187,16 @@ body:has(.learn-workspace) main {
 }
 
 .admin-lesson-selector-wrap {
-  margin-top: 0.5rem;
+  margin-top: 0.35rem;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
 }
 
 .admin-scope-callout {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 0.55rem;
   padding: 0.65rem 0.85rem;
   border-radius: var(--radius-sm);
@@ -4163,7 +4205,12 @@ body:has(.learn-workspace) main {
   color: #5f3dc4;
   font-size: 0.82rem;
   line-height: 1.45;
-  margin-top: 0.5rem;
+  margin-top: 0.35rem;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+  word-break: break-word;
 }
 
 .admin-notice {
@@ -4173,6 +4220,9 @@ body:has(.learn-workspace) main {
   border-radius: var(--radius-md);
   font-size: 0.88rem;
   line-height: 1.45;
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
 }
 
 .admin-notice--warn {
@@ -4188,15 +4238,20 @@ body:has(.learn-workspace) main {
   background: var(--surface-dim);
   border: 1px solid var(--line);
   border-radius: var(--radius-full);
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
 }
 
 .admin-mode-btn {
-  flex: 1;
+  flex: 1 1 0;
+  min-width: 0;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 0.4rem;
-  padding: 0.5rem 0.75rem;
+  gap: 0.35rem;
+  padding: 0.45rem 0.5rem;
   border-radius: var(--radius-full);
   border: none;
   background: transparent;
@@ -4207,12 +4262,29 @@ body:has(.learn-workspace) main {
   cursor: pointer;
   transition: all var(--anim-quick) var(--ease-out);
   white-space: nowrap;
+  box-sizing: border-box;
+}
+
+.admin-mode-btn span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .admin-mode-btn--active {
   background: #fff !important;
   color: var(--red-deep) !important;
   box-shadow: 0 2px 6px rgba(0, 0, 0, 0.06);
+}
+
+@media (max-width: 360px) {
+  .admin-mode-toggle {
+    flex-direction: column;
+    border-radius: var(--radius-md);
+  }
+  .admin-mode-btn {
+    border-radius: var(--radius-sm);
+  }
 }
 
 .admin-file-dropzone {

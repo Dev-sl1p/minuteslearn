@@ -431,9 +431,10 @@ export function AdminMaterials({
                     materialMode === "upload" ? "admin-mode-btn--active" : ""
                   }`}
                   onClick={() => setMaterialMode("upload")}
+                  title="อัปโหลดไฟล์ตรงเข้า Supabase Storage (สูงสุด 150MB)"
                 >
-                  <Icon name="cloud_upload" size={18} />
-                  <span>อัปโหลดไฟล์ตรงไป Storage</span>
+                  <Icon name="cloud_upload" size={17} />
+                  <span>อัปโหลดไฟล์</span>
                 </button>
                 <button
                   type="button"
@@ -443,9 +444,10 @@ export function AdminMaterials({
                     materialMode === "link" ? "admin-mode-btn--active" : ""
                   }`}
                   onClick={() => setMaterialMode("link")}
+                  title="ใส่ลิงก์ไฟล์ภายนอก เช่น Google Drive, Figma, GitHub"
                 >
-                  <Icon name="link" size={18} />
-                  <span>ใส่ลิงก์ภายนอก (HTTPS)</span>
+                  <Icon name="link" size={17} />
+                  <span>แนบลิงก์</span>
                 </button>
               </div>
 
