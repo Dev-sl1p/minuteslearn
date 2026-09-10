@@ -264,3 +264,62 @@ test('LibraryView renders course tabs and displays material count badge', () => 
   assert.ok(fullText.includes('2 ไฟล์')); // Course card material button
 });
 
+test('AdminMaterials renders course selector, lesson dropdown, and submits links to chosen course', async () => {
+  const hooks = reactHarness();
+  const calls = [];
+  const source = loadSource('src/components/admin-materials.tsx', {
+    react: hooks.react,
+    'react/jsx-runtime': jsx,
+    '@/components/icon': { Icon: 'Icon' },
+    '@/components/library-view': {
+      formatBytes: (b) => `${b} B`,
+      getFileTypeMeta: () => ({ icon: 'description', label: 'PDF', kind: 'pdf' }),
+    },
+  });
+
+  const mockCourses = [
+    {
+      id: 'course-a',
+      title: 'Course Alpha',
+      slug: 'alpha',
+      coverUrl: null,
+      lessons: [
+        { id: 'lesson-a1', title: 'Alpha Intro', slug: 'intro', order: 1, resources: [{ id: 'res-1', title: 'Worksheet 1', storagePath: null, url: 'https://example.com/sheet.pdf', mimeType: 'application/pdf', sizeBytes: 1024, order: 1 }] },
+      ],
+    },
+    {
+      id: 'course-b',
+      title: 'Course Beta',
+      slug: 'beta',
+      coverUrl: null,
+      lessons: [
+        { id: 'lesson-b1', title: 'Beta Getting Started', slug: 'start', order: 1, resources: [] },
+      ],
+    },
+  ];
+
+  const rendered = hooks.render(source.AdminMaterials, {
+    courses: mockCourses,
+    initialCourseId: 'course-a',
+    onUploadResource: async (...args) => { calls.push(['upload', ...args]); },
+    onAddResourceLink: async (...args) => { calls.push(['link', ...args]); },
+    onDeleteResource: async (...args) => { calls.push(['delete', ...args]); },
+    onGoCurriculum: () => {},
+    pending: false,
+  });
+
+  const text = (node) =>
+    node == null || typeof node === 'boolean'
+      ? ''
+      : typeof node !== 'object'
+        ? String(node)
+        : [node.props?.children].flat(Infinity).map(text).join('');
+
+  const fullText = text(rendered.tree);
+  assert.ok(fullText.includes('เพิ่มไฟล์ประกอบ (Add Material)'));
+  assert.ok(fullText.includes('Course Alpha'));
+  assert.ok(fullText.includes('Course Beta'));
+  assert.ok(fullText.includes('Worksheet 1'));
+});
+
+

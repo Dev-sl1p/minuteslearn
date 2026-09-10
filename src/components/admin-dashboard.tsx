@@ -4,6 +4,7 @@ import Link from "next/link";
 import Image from "next/image";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { AdminAnalytics } from "@/components/admin-analytics";
+import { AdminMaterials } from "@/components/admin-materials";
 import { AdminOverview } from "@/components/admin-overview";
 import { Icon } from "@/components/icon";
 import { LoadingBlock, LoadingOverlay, Spinner } from "@/components/loading";
@@ -56,6 +57,7 @@ type License = {
   id: string;
   key: string;
   status: string;
+  expiresAt: string | null;
   redeemedAt: string;
   user: { email: string | null; name: string | null };
   course: { title: string; slug: string } | null;
@@ -76,6 +78,7 @@ type Tab =
   | "analytics"
   | "courses"
   | "videos"
+  | "materials"
   | "licenses"
   | "security";
 
@@ -254,6 +257,7 @@ export function AdminDashboard() {
   const [moduleTitle, setModuleTitle] = useState("");
   const [resourceTitle, setResourceTitle] = useState("");
   const [resourceUrl, setResourceUrl] = useState("");
+  const [materialCourseId, setMaterialCourseId] = useState<string>("");
   const [licenseSearch, setLicenseSearch] = useState("");
   const [licenseStatusFilter, setLicenseStatusFilter] = useState<
     "ALL" | "ACTIVE" | "REVOKED"
@@ -1069,14 +1073,30 @@ export function AdminDashboard() {
     }
   }
 
-  async function addResourceLink(e: React.FormEvent) {
-    e.preventDefault();
-    if (!lessonForm.id) {
+  async function addResourceLink(
+    eOrLessonId: React.FormEvent | string,
+    maybeTitle?: string,
+    maybeUrl?: string,
+  ) {
+    let targetLessonId: string;
+    let title: string;
+    let url: string;
+
+    if (typeof eOrLessonId === "string") {
+      targetLessonId = eOrLessonId;
+      title = (maybeTitle || "").trim();
+      url = (maybeUrl || "").trim();
+    } else {
+      eOrLessonId.preventDefault();
+      targetLessonId = lessonForm.id;
+      title = resourceTitle.trim();
+      url = resourceUrl.trim();
+    }
+
+    if (!targetLessonId) {
       toast.error("บันทึกบทเรียนก่อน แล้วค่อยแนบไฟล์");
       return;
     }
-    const title = resourceTitle.trim();
-    const url = resourceUrl.trim();
     if (!title || !url) {
       toast.error("ใส่ชื่อและลิงก์ไฟล์");
       return;
@@ -1084,21 +1104,20 @@ export function AdminDashboard() {
     setPendingLabel("กำลังเพิ่มลิงก์ไฟล์...");
     setPending(true);
     try {
-    const res = await fetch("/api/admin/resources", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ lessonId: lessonForm.id, title, url }),
-    });
-    const data = await res.json();
-    if (!res.ok) {
-      toast.error("เพิ่มลิงก์ไม่สำเร็จ", data.error);
-      return;
-    }
-    toast.ok("เพิ่มลิงก์ไฟล์แล้ว", title);
-    setResourceTitle("");
-    setResourceUrl("");
-    await refresh({ silent: true, scopes: ["courses"] });
-
+      const res = await fetch("/api/admin/resources", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ lessonId: targetLessonId, title, url }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        toast.error("เพิ่มลิงก์ไม่สำเร็จ", data.error);
+        return;
+      }
+      toast.ok("เพิ่มลิงก์ไฟล์แล้ว", title);
+      setResourceTitle("");
+      setResourceUrl("");
+      await refresh({ silent: true, scopes: ["courses"] });
     } catch {
       toast.error("เชื่อมต่อไม่สำเร็จ", "ตรวจสอบข้อมูลล่าสุดก่อนลองบันทึกอีกครั้ง");
     } finally {
@@ -1124,8 +1143,13 @@ export function AdminDashboard() {
     }
   }
 
-  async function uploadResource(file: File) {
-    if (!lessonForm.id) {
+  async function uploadResource(
+    file: File,
+    targetLessonId?: string,
+    overrideTitle?: string,
+  ) {
+    const lessonId = targetLessonId || lessonForm.id;
+    if (!lessonId) {
       toast.error("บันทึกบทเรียนก่อน แล้วค่อยอัปโหลด");
       return;
     }
@@ -1138,8 +1162,8 @@ export function AdminDashboard() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          lessonId: lessonForm.id,
-          title: resourceTitle.trim() || file.name,
+          lessonId,
+          title: (overrideTitle || resourceTitle).trim() || file.name,
           fileName: file.name,
           mimeType: file.type || null,
           sizeBytes: file.size,
@@ -1220,7 +1244,7 @@ export function AdminDashboard() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           resourceId,
-          lessonId: lessonForm.id,
+          lessonId,
           title,
           storagePath,
           mimeType: mime,
@@ -1328,6 +1352,7 @@ export function AdminDashboard() {
     { id: "dashboard", label: "ภาพรวม", icon: "dashboard" },
     { id: "courses", label: "คอร์สเรียน", icon: "library_books" },
     { id: "videos", label: "โครงสร้างบทเรียน", icon: "video_library" },
+    { id: "materials", label: "ไฟล์ประกอบ", icon: "folder_zip" },
     { id: "licenses", label: "จัดการคีย์", icon: "vpn_key" },
     { id: "analytics", label: "วิเคราะห์ผู้เรียน", icon: "analytics" },
     { id: "security", label: "ความปลอดภัย", icon: "shield" },
@@ -1608,6 +1633,17 @@ export function AdminDashboard() {
                       }}
                     >
                       จัดบทเรียน ({c.lessons.length})
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn--ghost"
+                      title="จัดการและเพิ่มไฟล์ประกอบของคอร์สนี้"
+                      onClick={() => {
+                        setMaterialCourseId(c.id);
+                        setTab("materials");
+                      }}
+                    >
+                      ไฟล์ประกอบ ({c.lessons.reduce((s, l) => s + (l.resources?.length ?? 0), 0)})
                     </button>
                     <Link
                       href={`/learn/${c.slug}`}
@@ -2463,6 +2499,23 @@ export function AdminDashboard() {
             )}
           </section>
         </div>
+      )}
+
+      {tab === "materials" && (
+        <AdminMaterials
+          courses={courses}
+          initialCourseId={materialCourseId || selectedCourseId}
+          onUploadResource={uploadResource}
+          onAddResourceLink={async (lessonId, title, url) => {
+            await addResourceLink(lessonId, title, url);
+          }}
+          onDeleteResource={deleteResource}
+          onGoCurriculum={(courseId) => {
+            selectCourse(courseId);
+            setTab("videos");
+          }}
+          pending={pending}
+        />
       )}
 
       {tab === "licenses" && (
