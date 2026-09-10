@@ -12,8 +12,8 @@ export default async function LoginPage({ searchParams }: { searchParams: Promis
       <div className="auth-card panel anim-rise">
         <h1 className="page-title">เข้าเรียน</h1>
         <p className="page-lead">
-          ใช้อีเมลกับคีย์จากร้านเพื่อเข้าเรียน ครั้งแรกจะผูกคีย์กับอีเมลนั้นถาวร
-          ครั้งต่อไปใช้คู่เดิมได้เลย
+          โปรดเลือกใช้อีเมลที่ท่านใช้งานเป็นประจํา
+          เนื่องจากคีย์เพื่อเข้าเรียนจะถูกเชื่อมกับอีเมลของท่านอย่างถาวร
         </p>
         <LoginForm returnTo={next} />
         <p className="muted" style={{ marginTop: "1.25rem", fontSize: "0.85rem", lineHeight: 1.5 }}>
