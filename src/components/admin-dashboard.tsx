@@ -1566,8 +1566,11 @@ export function AdminDashboard() {
                         wooProductId: e.target.value,
                       }))
                     }
-                    placeholder="123"
+                    placeholder="เช่น 119 หรือ 119, 120"
                   />
+                  <span className="muted" style={{ fontSize: "0.82rem" }}>
+                    ID สินค้าตัวเลขจาก WooCommerce (คั่นด้วยจุลภาคได้)
+                  </span>
                 </label>
                 <label>
                   Woo SKU
@@ -1576,7 +1579,11 @@ export function AdminDashboard() {
                     onChange={(e) =>
                       setCourseForm((f) => ({ ...f, wooSku: e.target.value }))
                     }
+                    placeholder="เช่น davinci-course"
                   />
+                  <span className="muted" style={{ fontSize: "0.82rem" }}>
+                    รหัส SKU สินค้าจากร้าน (เช่น davinci-course)
+                  </span>
                 </label>
               </div>
               <label className="admin-check">
@@ -1640,11 +1647,18 @@ export function AdminDashboard() {
                         <span className="badge">ฉบับร่าง</span>
                       )}
                     </span>
-                    {(c.wooProductId || c.wooSku) && (
-                      <span className="muted">
-                        Woo: {c.wooProductId ?? "—"} / {c.wooSku ?? "—"}
+                    {c.wooProductId || c.wooSku ? (
+                      <span className="muted" style={{ fontSize: "0.82rem" }}>
+                        Woo: ID {c.wooProductId ?? "—"} / SKU {c.wooSku ?? "—"}
                       </span>
-                    )}
+                    ) : c.published ? (
+                      <span
+                        className="badge badge--warn"
+                        style={{ fontSize: "0.75rem", alignSelf: "flex-start" }}
+                      >
+                        ยังไม่ผูกสินค้า Woo
+                      </span>
+                    ) : null}
                   </button>
                   <div className="admin-course-card__actions">
                     <button

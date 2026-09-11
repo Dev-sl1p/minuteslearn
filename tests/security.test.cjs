@@ -57,6 +57,36 @@ test('a mismatched product cannot fall back to the only paid course', async () =
   assert.equal(activated, false);
 });
 
+test('robust course mapping resolves product by comma-delimited ID or SKU matching slug', async () => {
+  let activated = false;
+  const course = { id: 'c1', title: 'Davinci', slug: 'davinci-course', wooProductId: '119, 120', wooSku: 'davinci-course' };
+  const source = loadSource('src/lib/redeem.ts', {
+    '@/lib/db': {
+      prisma: {
+        license: { findFirst: async () => null, create: async ({ data }) => data },
+        course: {
+          findFirst: async () => null,
+          findMany: async () => [course],
+        },
+        entitlement: { upsert: async () => ({}) },
+        $transaction: async (cb) => cb({
+          license: { create: async ({ data }) => data },
+          entitlement: { upsert: async () => ({}) },
+        }),
+      },
+    },
+    '@/lib/wp-license': {
+      validateLicense: async () => ({ key: 'valid', status: 'active', productId: '119', productSku: 'davinci-course' }),
+      activateLicense: async () => { activated = true; return { ok: true }; },
+    },
+    '@/lib/license-status': {},
+  });
+  const result = await source.redeemLicenseKey({ userId: 'learner', licenseKey: 'valid', instanceId: 'device' });
+  assert.equal(result.ok, true);
+  assert.equal(result.course.id, 'c1');
+  assert.equal(activated, true);
+});
+
 test('login sessions fail after revocation, password changes, role changes, or expiration', async () => {
   const user = { id: 'user', role: 'ADMIN', passwordHash: 'original-hash' };
   let record;

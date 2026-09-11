@@ -101,21 +101,71 @@ async function findCourseForLicense(
   productId?: string,
   productSku?: string,
 ) {
-  if (productSku) {
+  const cleanSku = productSku?.trim();
+  const cleanId = productId?.trim();
+
+  if (cleanSku) {
     const bySku = await prisma.course.findFirst({
-      where: { wooSku: { equals: productSku, mode: "insensitive" } },
+      where: {
+        OR: [
+          { wooSku: { equals: cleanSku, mode: "insensitive" } },
+          { wooProductId: { equals: cleanSku, mode: "insensitive" } },
+          { slug: { equals: cleanSku, mode: "insensitive" } },
+        ],
+      },
     });
     if (bySku) return bySku;
   }
-  if (productId) {
+  if (cleanId) {
     const byId = await prisma.course.findFirst({
-      where: { wooProductId: { equals: productId, mode: "insensitive" } },
+      where: {
+        OR: [
+          { wooProductId: { equals: cleanId, mode: "insensitive" } },
+          { wooSku: { equals: cleanId, mode: "insensitive" } },
+        ],
+      },
     });
     if (byId) return byId;
   }
 
+  // Match delimited lists (e.g. comma-separated IDs or SKUs)
+  if (cleanId || cleanSku) {
+    const courses = await prisma.course.findMany({
+      where: {
+        published: true,
+        OR: [{ wooProductId: { not: null } }, { wooSku: { not: null } }],
+      },
+    });
+
+    for (const course of courses) {
+      const ids = (course.wooProductId ?? "")
+        .split(/[,|\s]+/)
+        .map((s) => s.trim().toLowerCase())
+        .filter(Boolean);
+      const skus = (course.wooSku ?? "")
+        .split(/[,|\s]+/)
+        .map((s) => s.trim().toLowerCase())
+        .filter(Boolean);
+
+      if (
+        cleanId &&
+        (ids.includes(cleanId.toLowerCase()) || skus.includes(cleanId.toLowerCase()))
+      ) {
+        return course;
+      }
+      if (
+        cleanSku &&
+        (skus.includes(cleanSku.toLowerCase()) ||
+          ids.includes(cleanSku.toLowerCase()) ||
+          course.slug.toLowerCase() === cleanSku.toLowerCase())
+      ) {
+        return course;
+      }
+    }
+  }
+
   // Never assign a different product's key to the only available course.
-  if (productId || productSku) return null;
+  if (cleanId || cleanSku) return null;
   // Legacy keys without any product identity may use a single explicit mapping.
   const mapped = await prisma.course.findMany({
     where: {
@@ -126,8 +176,8 @@ async function findCourseForLicense(
   const usable = mapped.filter((course) => course.wooProductId || course.wooSku);
   if (usable.length === 1) {
     console.warn("License product not mapped; using the only Woo-linked course", {
-      productId,
-      productSku,
+      productId: cleanId,
+      productSku: cleanSku,
       courseId: usable[0].id,
       courseSlug: usable[0].slug,
     });

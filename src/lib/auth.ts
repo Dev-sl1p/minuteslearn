@@ -77,7 +77,22 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
           const result = await loginWithEmailAndLicense({ email, licenseKey });
           if (result.ok && result.user.role !== "USER") throw new LoginError("INVALID_KEY");
           if (!result.ok) {
-            await logSecurityEvent({ type: "LOGIN_FAIL", severity: "warn", message: `License login failed: ${result.error}`, actorEmail: email, ip });
+            const meta =
+              "productId" in result || "productSku" in result
+                ? {
+                    error: result.error,
+                    productId: result.productId,
+                    productSku: result.productSku,
+                  }
+                : null;
+            await logSecurityEvent({
+              type: "LOGIN_FAIL",
+              severity: "warn",
+              message: `License login failed: ${result.error}`,
+              actorEmail: email,
+              ip,
+              meta,
+            });
             throw new LoginError(result.error);
           }
           await logSecurityEvent({ type: "LOGIN_OK", message: "License login success", actorId: result.user.id, actorEmail: email, ip });
