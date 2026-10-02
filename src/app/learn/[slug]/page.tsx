@@ -9,24 +9,46 @@ import {
   getCompletedLessonIds,
   isLessonUnlocked,
 } from "@/lib/progress";
+import { normalizeSlug, slugsMatch } from "@/lib/security";
 
 type Props = {
   params: Promise<{ slug: string }>;
 };
 
 export default async function LearnCoursePage({ params }: Props) {
-  const { slug } = await params;
+  const { slug: rawSlug } = await params;
+  const slug = normalizeSlug(rawSlug);
   const session = await auth();
-  if (!session?.user?.id) redirect(`/login?next=/learn/${slug}`);
+  if (!session?.user?.id) redirect(`/login?next=/learn/${encodeURIComponent(slug)}`);
 
   const isAdmin = session.user.role === "ADMIN";
-  const course = await prisma.course.findUnique({
-    where: { slug },
+  let course = await prisma.course.findFirst({
+    where: {
+      OR: [
+        { slug },
+        { slug: rawSlug },
+        { id: rawSlug },
+      ],
+    },
     include: {
       modules: { orderBy: { order: "asc" } },
       lessons: { orderBy: { order: "asc" } },
     },
   });
+
+  if (!course) {
+    const allCourses = await prisma.course.findMany({
+      include: {
+        modules: { orderBy: { order: "asc" } },
+        lessons: { orderBy: { order: "asc" } },
+      },
+    });
+    course =
+      allCourses.find(
+        (c) => slugsMatch(c.slug, rawSlug) || slugsMatch(c.slug, slug),
+      ) ?? null;
+  }
+
   if (!course) notFound();
   if (!course.published && !isAdmin) notFound();
 

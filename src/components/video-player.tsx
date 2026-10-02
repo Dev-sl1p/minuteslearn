@@ -58,6 +58,7 @@ export function VideoPlayer({
   const [driveNativeFailed, setDriveNativeFailed] = useState(false);
   const [youtubeVideoId, setYoutubeVideoId] = useState<string | null>(null);
   const [markingDone, setMarkingDone] = useState(false);
+  const [deviceLimit, setDeviceLimit] = useState(false);
   const sessionTokenRef = useRef<string | null>(null);
   const hlsRef = useRef<Hls | null>(null);
   const lastReportRef = useRef(0);
@@ -65,6 +66,7 @@ export function VideoPlayer({
   const onCompletedRef = useRef(onCompleted);
   const resumeAtRef = useRef(0);
   const requestIdRef = useRef<string | null>(null);
+  const forceEvictRef = useRef(false);
   const [resumeAt, setResumeAt] = useState(0);
   const [attempt, setAttempt] = useState(0);
   useEffect(() => { onCompletedRef.current = onCompleted; }, [onCompleted]);
@@ -213,6 +215,8 @@ export function VideoPlayer({
       let deferBootingOff = false;
 
       try {
+        const evictOldest = forceEvictRef.current;
+        forceEvictRef.current = false;
         const res = await fetch("/api/playback/start", {
           method: "POST",
           signal: AbortSignal.timeout(20000),
@@ -221,18 +225,21 @@ export function VideoPlayer({
             lessonId,
             requestId: requestIdRef.current,
             label: getDeviceLabel(),
+            evictOldest,
           }),
         });
-        const data = (await res.json()) as StartResponse;
+        const data = (await res.json()) as StartResponse & { code?: string };
         if (!res.ok) {
           if (!cancelled) {
             const msg = data.error ?? "ไม่สามารถเริ่มสตรีมได้";
             setError(msg);
+            setDeviceLimit(data.code === "DEVICE_LIMIT" || msg.includes("เต็มจำนวนอุปกรณ์"));
             toast.error("เล่นวิดีโอไม่ได้", msg);
           }
           return;
         }
         if (cancelled) return;
+        setDeviceLimit(false);
 
         sessionTokenRef.current = data.sessionToken;
         resumeAtRef.current = Math.max(0, data.resumeAt ?? 0);
@@ -435,20 +442,45 @@ export function VideoPlayer({
       {error && !blocked && (
         <div className="player__error-box">
           <p className="form-error">{error}</p>
-          {error.includes("อุปกรณ์") && (
-            <a
-              href="/devices"
-              target="_blank"
-              rel="noreferrer"
-              className="btn btn--ghost"
-              style={{ marginTop: "0.5rem", display: "inline-flex" }}
-            >
-              ไปหน้าจัดการอุปกรณ์ ↗
-            </a>
+          {deviceLimit ? (
+            <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap", marginTop: "0.5rem" }}>
+              <button
+                type="button"
+                className="btn btn--primary"
+                onClick={() => {
+                  forceEvictRef.current = true;
+                  requestIdRef.current = crypto.randomUUID();
+                  setAttempt((v) => v + 1);
+                }}
+              >
+                ปลดเครื่องเก่าที่ไม่ได้ใช้แล้วดูต่อ
+              </button>
+              <a
+                href="/devices"
+                target="_blank"
+                rel="noreferrer"
+                className="btn btn--ghost"
+                style={{ display: "inline-flex" }}
+              >
+                จัดการอุปกรณ์ ↗
+              </a>
+            </div>
+          ) : (
+            error.includes("อุปกรณ์") && (
+              <a
+                href="/devices"
+                target="_blank"
+                rel="noreferrer"
+                className="btn btn--ghost"
+                style={{ marginTop: "0.5rem", display: "inline-flex" }}
+              >
+                ไปหน้าจัดการอุปกรณ์ ↗
+              </a>
+            )
           )}
         </div>
       )}
-      {error && !booting && (
+      {error && !booting && !deviceLimit && (
         <button className="btn btn--primary" type="button" onClick={() => { requestIdRef.current = crypto.randomUUID(); setAttempt((value) => value + 1); }}>
           {blocked ? "สลับมาดูเครื่องนี้" : "ลองโหลดวิดีโออีกครั้ง"}
         </button>

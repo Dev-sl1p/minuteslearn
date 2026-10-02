@@ -8,22 +8,31 @@ import {
   isLessonUnlocked,
 } from "@/lib/progress";
 import { LearnWorkspace } from "@/components/learn-workspace";
-import { slugsMatch } from "@/lib/security";
+import { normalizeSlug, slugsMatch } from "@/lib/security";
 
 type Props = {
   params: Promise<{ slug: string; lessonSlug: string }>;
 };
 
 export default async function LessonPage({ params }: Props) {
-  const { slug, lessonSlug } = await params;
+  const { slug: rawSlug, lessonSlug: rawLessonSlug } = await params;
+  const slug = normalizeSlug(rawSlug);
+  const lessonSlug = normalizeSlug(rawLessonSlug);
+
   const session = await auth();
   if (!session?.user?.id) {
-    redirect(`/login?next=/learn/${slug}/${lessonSlug}`);
+    redirect(`/login?next=/learn/${encodeURIComponent(slug)}/${encodeURIComponent(lessonSlug)}`);
   }
 
   const isAdmin = session.user.role === "ADMIN";
-  const course = await prisma.course.findUnique({
-    where: { slug },
+  let course = await prisma.course.findFirst({
+    where: {
+      OR: [
+        { slug },
+        { slug: rawSlug },
+        { id: rawSlug },
+      ],
+    },
     include: {
       modules: { orderBy: { order: "asc" } },
       lessons: {
@@ -32,6 +41,23 @@ export default async function LessonPage({ params }: Props) {
       },
     },
   });
+
+  if (!course) {
+    const allCourses = await prisma.course.findMany({
+      include: {
+        modules: { orderBy: { order: "asc" } },
+        lessons: {
+          orderBy: { order: "asc" },
+          include: { resources: { orderBy: { order: "asc" } } },
+        },
+      },
+    });
+    course =
+      allCourses.find(
+        (c) => slugsMatch(c.slug, rawSlug) || slugsMatch(c.slug, slug),
+      ) ?? null;
+  }
+
   if (!course) notFound();
   if (!course.published && !isAdmin) notFound();
 
@@ -39,9 +65,11 @@ export default async function LessonPage({ params }: Props) {
     userHasCourseAccess(session.user.id, course.id, { isAdmin }),
     getCompletedLessonIds(session.user.id, course.id),
   ]);
-  if (!allowed) redirect(`/learn/${slug}`);
+  if (!allowed) redirect(`/learn/${encodeURIComponent(course.slug)}`);
 
-  const lesson = course.lessons.find((l) => slugsMatch(l.slug, lessonSlug));
+  const lesson = course.lessons.find((l) =>
+    slugsMatch(l.slug, rawLessonSlug) || slugsMatch(l.slug, lessonSlug) || l.id === rawLessonSlug,
+  );
   if (!lesson) notFound();
 
   const gates = course.lessons.map((l) => ({

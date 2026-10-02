@@ -12,6 +12,7 @@ const schema = z.object({
   lessonId: z.string().min(1),
   requestId: z.string().uuid(),
   label: z.string().max(80).optional(),
+  evictOldest: z.boolean().optional(),
 });
 
 export async function POST(req: Request) {
@@ -50,14 +51,17 @@ export async function POST(req: Request) {
     fingerprint: session.user.fingerprint,
     label: parsed.data.label,
     skipLimit: isAdmin,
+    autoEvict: parsed.data.evictOldest === true,
   });
   if (!deviceResult.ok) {
     return NextResponse.json(
       {
+        code: deviceResult.error,
         error:
           deviceResult.error === "DEVICE_LIMIT"
             ? "เต็มจำนวนอุปกรณ์แล้ว — ปลดเครื่องเก่าก่อน"
             : "อุปกรณ์นี้ถูกระงับแล้ว",
+        canEvict: deviceResult.error === "DEVICE_LIMIT",
       },
       { status: 403 },
     );
